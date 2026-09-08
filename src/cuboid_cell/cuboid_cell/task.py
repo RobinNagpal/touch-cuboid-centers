@@ -69,12 +69,17 @@ SIDE_APPROACH_TILT = math.radians(40.0)
 TOUCH_DEPTH = 0.004
 
 # How much narrower than the box the fingers are told to close, so that they
-# stop on the box rather than at their target. Deliberately small: the fingers
-# are position controlled, so a large number means asking them to be somewhere
-# the box already is, and the simulator resolves that by firing the box out
-# sideways. Whether the box is really held is read from the fingertip contact
-# sensors, not from how far the fingers travelled.
-GRIP_SQUEEZE = 0.002
+# stop on the box rather than at their target.
+#
+# It is bounded on both sides. Below about 3 mm it is smaller than the error in
+# the measured width, so on a box measured a couple of millimetres too wide the
+# fingers close on nothing. Above about 5 mm the fingers are being asked to be
+# somewhere the box already is, and since they are position controlled, the
+# simulator resolves that by firing the box out sideways.
+#
+# Whether the box is really held is read from the fingertip contact sensors
+# rather than from how far the fingers travelled.
+GRIP_SQUEEZE = 0.004
 
 
 @dataclass
@@ -106,16 +111,24 @@ class TouchCuboidsTask:
         slots = zone_slots(DONE_ZONE, max(len(pending), 1))
 
         results: list[Result] = []
-        for index, slot in enumerate(slots):
+        # A slot is only used up by a box that actually reaches it, so a
+        # cuboid the arm fumbles is tried again rather than costing a place on
+        # the done side. The cap is what stops a box the arm simply cannot
+        # manage from being retried forever.
+        tries_left = 2 * len(slots)
+        while len(results) < len(slots) and tries_left > 0:
+            tries_left -= 1
+
             # The pending side is surveyed again every time round, so the boxes
             # still to do are whatever is still there. A box the first survey
-            # missed gets picked up on a later pass.
+            # missed, or one the arm dropped, gets picked up on a later pass.
             remaining = self._survey(PENDING_ZONE)
             if not remaining:
                 break
 
             target = min(remaining, key=lambda box: np.linalg.norm(box.centre - ROBOT_BASE))
-            self._log.info(f"--- cuboid {index + 1} of {len(slots)} ---")
+            slot = slots[len(results)]
+            self._log.info(f"--- cuboid {len(results) + 1} of {len(slots)} ---")
 
             # Everything except the box being picked stays in the planning
             # scene as an obstacle.

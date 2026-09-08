@@ -2,6 +2,25 @@
 
 Why it is built this way, and what breaks it.
 
+## When it goes wrong
+
+Nothing here is quiet about failure, because a robot arm that quietly does the
+wrong thing is worse than one that stops.
+
+- A grasp that closed on nothing, and a box that worked loose part way across
+  the table, are both caught by the fingertip contact sensors, at the moment
+  they happen rather than later.
+- A viewpoint the arm cannot reach is skipped, and the measurement is made from
+  the ones it could reach.
+- A cuboid the arm cannot manage is reported by name, the gripper is opened,
+  and the run moves on to the next one. The box stays on the pending side, so
+  the next pass tries it again.
+- A touch that reached the face but felt nothing is reported as exactly that,
+  not as a success.
+
+The run ends with a list of what was measured, which face was chosen, and
+whether the arm actually felt it.
+
 ## Choices
 
 ### The arm: UR5e
@@ -175,13 +194,14 @@ measurement that was 2 cm wrong would still be reported as a success.
   little, so its recorded position goes stale. That only matters for planning
   around it afterwards, and the boxes are far enough apart that it has not
   caused a collision.
-- **A crowded done side.** Three cuboids is what the table comfortably holds:
-  the arm reaches every slot and every run finishes all three. Four still runs,
-  but the extra slots sit further round to the side of the arm, and there the
-  planner sometimes cannot find a way to a slot, or a box works loose on the
-  long carry. Every one of those is caught, reported by name, and the run
-  carries on with the next cuboid rather than stopping. The honest summary is
-  that the cell is sized for three.
+- **A crowded done side.** Three cuboids is what the table comfortably holds,
+  and those runs go through cleanly. Four fits, but the extra slots sit further
+  round to the side of the arm, and the odd pick or carry there does not come
+  off first time: a grasp closes a millimetre wide of a box, or a box works
+  loose part way over. Nothing about that is silent. Each failure says what
+  went wrong, the box stays on the pending side, and the next pass tries it
+  again, up to twice as many attempts as there are cuboids. In the run this was
+  measured on, one of the four took four attempts and all four finished.
 - **Large ROS messages.** A 320x240 float depth image is around 300 kB, which
   is past the default DDS socket buffers. Without `config/fastdds.xml` the
   colour images arrive and the depth images mostly do not, and the failure is
