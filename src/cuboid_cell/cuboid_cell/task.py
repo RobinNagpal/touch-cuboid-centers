@@ -101,6 +101,14 @@ class TouchCuboidsTask:
     # ------------------------------------------------------------------ run
 
     def run(self) -> list[Result]:
+        # The launch file gives the cell a head start, but how long it really
+        # needs depends on the machine, so wait for the pieces themselves
+        # rather than trust that the head start was long enough.
+        self._log.info("waiting for the cell to come up")
+        self._scene.wait_until_ready()
+        self._arm.wait_until_ready()
+        self._camera.wait_until_ready()
+
         self._scene.add_table()
         self._arm.set_gripper(GRIPPER_MAX_OPENING)
 

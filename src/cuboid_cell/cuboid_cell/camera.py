@@ -87,6 +87,22 @@ class WristCamera:
             self._info = msg
             self._counts["info"] += 1
 
+    def wait_until_ready(self, timeout: float = 120.0) -> None:
+        """Block until the first frames and the intrinsics have arrived.
+
+        The camera only starts publishing once Gazebo has the sensor running,
+        which is later than the rest of the cell comes up.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._lock:
+                ready = self._rgb is not None and self._depth is not None and self._info is not None
+            if ready:
+                return
+            time.sleep(0.05)
+
+        raise CaptureTimeout(f"no camera frames within {timeout:.0f}s (messages so far: {self._counts})")
+
     def capture(self, timeout: float = 10.0) -> View:
         """Take a fresh frame.
 

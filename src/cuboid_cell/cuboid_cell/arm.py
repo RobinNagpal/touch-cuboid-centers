@@ -78,6 +78,24 @@ class Arm:
             JointState, "/joint_states", self._on_joint_states, 10, callback_group=sensors
         )
 
+    # --------------------------------------------------------------- startup
+
+    def wait_until_ready(self, timeout: float = 120.0) -> None:
+        """Block until the controllers and the Cartesian service are up.
+
+        How long the simulator needs to get there depends on the machine it is
+        running on, so this waits for the things themselves rather than for a
+        fixed delay that is generous on one machine and short on the next.
+        """
+        deadline = time.monotonic() + timeout
+        for what, wait in (
+            ("the arm controller", self._arm_controller.wait_for_server),
+            ("the gripper controller", self._gripper.wait_for_server),
+            ("/compute_cartesian_path", self._cartesian.wait_for_service),
+        ):
+            if not wait(timeout_sec=max(0.0, deadline - time.monotonic())):
+                raise MotionFailed(f"{what} did not come up within {timeout:.0f}s")
+
     # ---------------------------------------------------------------- moving
 
     def move_to_named(self, name: str) -> None:
