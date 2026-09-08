@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Middleware settings for the depth camera.
+
+  ROS 2 splits a message larger than one datagram into fragments, and if any
+  one fragment is dropped the whole frame is thrown away. A 320x240 float
+  depth image is 300 kB, which is well past the default socket buffers, so
+  with the stock settings the colour image arrives and the depth image mostly
+  does not. Both transports are declared here with room for a few frames.
+
+  Pointed at by FASTRTPS_DEFAULT_PROFILES_FILE in launch/cell.launch.py.
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <profiles>
+    <transport_descriptors>
+      <!-- Everything here runs on one machine, so shared memory carries the
+           traffic and this is the size that matters. -->
+      <transport_descriptor>
+        <transport_id>shm_large</transport_id>
+        <type>SHM</type>
+        <segment_size>16777216</segment_size>
+      </transport_descriptor>
+      <!-- Kept as the fallback. 4 MB stays under the 8 MB that macOS allows a
+           single socket by default. -->
+      <transport_descriptor>
+        <transport_id>udp_large</transport_id>
+        <type>UDPv4</type>
+        <sendBufferSize>4194304</sendBufferSize>
+        <receiveBufferSize>4194304</receiveBufferSize>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="large_message_participant" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>shm_large</transport_id>
+          <transport_id>udp_large</transport_id>
+        </userTransports>
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

@@ -1,0 +1,229 @@
+# Implementation notes
+
+Why it is built this way, and what breaks it.
+
+## Choices
+
+### The arm: UR5e
+
+The problem asks for a 6-axis arm. The UR5e is the obvious pick: Universal
+Robots publish `ur_description` themselves, so the link lengths, masses and
+joint limits in this repo are the manufacturer's numbers rather than something
+approximated. It has 850 mm of reach, which comfortably covers a table the arm
+is standing on. Nothing in the code is UR-specific; `ur_type` in the xacro would
+take `ur3e` or `ur10e` just as well, though the zones in `cell.py` would need
+to shrink or grow to match the new reach.
+
+### The gripper: written here, not borrowed
+
+Universal Robots do not make a gripper, and the open-source models of the ones
+people bolt onto a UR (the Robotiq 2F-85, for example) use *mimic* joints,
+where one finger is defined as following the other. Simulated hardware has to
+understand mimic joints for that to work, and support for them varies. Two
+independent finger joints commanded to the same number needs nothing special
+from anybody, so that is what this is.
+
+The fingers are 12 cm long, which is longer than they need to be for gripping.
+The reason is touching. To reach the side of a tall box the arm comes in from
+above at an angle, and with short fingers the body of the gripper reaches the
+top of the box before the fingertip reaches the face.
+
+### The camera: on the wrist
+
+The problem says the camera moves with the arm, which is also the more useful
+arrangement: pointing the tool at something is the same as pointing the camera
+at it, and the arm can walk the camera around a box to see sides that were
+hidden from the first viewpoint. The cost is that a frame is only meaningful
+together with the arm pose it was taken at, which is why `camera.py` hands back
+the image and the camera-to-world transform together rather than separately.
+
+### The planner: MoveIt, mostly in-process
+
+Free moves are planned by OMPL inside the task node, through MoveIt's Python
+API. That keeps the planner's picture of the world and the code that changes it
+in one process.
+
+Two things still go through `move_group`, because MoveIt only offers them as
+services: straight-line Cartesian paths, and edits to the planning scene. The
+in-process planner is configured to watch the scene `move_group` publishes, so
+adding the table in one place makes it visible in both.
+
+### Gripping, and why the grip is gentle
+
+The finger joints are position controlled. Telling a position-controlled finger
+to be somewhere the box already is does not produce a firmer grip; it produces
+a rigid interference that the physics engine resolves by firing the box out
+sideways. So the fingers are told to close only 2 mm narrower than the box was
+measured to be, and the joints are given a 25 N effort limit — far more than
+the few newtons needed to hold a wooden block, far less than a finger driven at
+full strength into something it cannot squash.
+
+That leaves the question of how the arm knows it has hold of anything, because
+2 mm is not a difference in finger travel worth trusting. The answer is the
+fingertip contact sensors: they are checked once when the fingers close, and
+again before the box is released at the other end of the table. A grasp that
+missed and a box that worked loose on the way over are both caught that way,
+and both are reported by name rather than being noticed later as a box that
+went missing.
+
+## How the measuring works
+
+### Finding the cuboids
+
+The cuboids are the only saturated colours in the cell — the table, the floor
+and the robot are all grey — so a threshold on saturation in HSV separates them
+from everything else. That is the whole segmentation step. It is not a
+general-purpose object detector, and it is not meant to be: the assumption is
+stated up front, and it means the measurement is being tested rather than the
+detector.
+
+The mask is then eroded by one pixel. At the silhouette of an object, a depth
+pixel is a blend of the object and whatever is behind it, and those blended
+pixels back-project into mid-air, where they stretch the fitted box.
+
+### Getting to 3D
+
+Masked pixels are back-projected through the camera intrinsics into the
+camera's optical frame, then through the camera pose into the world:
+
+```
+X = (u - cx) * depth / fx
+Y = (v - cy) * depth / fy
+Z = depth
+```
+
+`camera_to_world` comes from TF, for the frame `wrist_camera_optical_frame`.
+Gazebo renders along a link's x axis and ROS projects images along z, so the
+model carries two frames a quarter turn apart, and this is the one that matches
+the images.
+
+### Splitting the cloud up
+
+Points are dropped into a 12 mm voxel grid and neighbouring occupied voxels are
+flood-filled together. This is cheap — linear in the number of occupied voxels,
+not quadratic in the number of points — and it is enough because the problem
+states the cuboids are set apart. Boxes touching each other would come back as
+one cluster and be measured as one large box.
+
+### Fitting a box
+
+Height is the highest point above the table. The camera always looks down on a
+box, so it always sees the top face, and the top face is the height.
+
+Length and width come from `cv2.minAreaRect` on the same points seen from
+above. The smallest rectangle enclosing the top face *is* the box's footprint,
+so this needs no iteration and no initial guess. Two details:
+
+- The points are converted to millimetres first. OpenCV's convex hull maths is
+  tuned for pixel-sized numbers, and in metres every coordinate in this cell
+  sits inside a 1.0 box.
+- The longer of the two sides is called the length, and the yaw is turned a
+  quarter turn to match when they swap. Without that, a box would change its
+  reported orientation as it rotated past 45 degrees.
+
+The table height is taken from `cell.py` rather than fitted from the data. The
+table is a fixed part of the cell — it is the surface the arm is bolted to —
+so its height is known in the same way the arm's own dimensions are known.
+
+Measured against the sizes the simulator was told to spawn, the fits come out
+within about a millimetre.
+
+### Picking the face
+
+A cuboid has six faces in three matching pairs, so there are three areas to
+compare: length x width, length x height, width x height. The largest is taken,
+with two rules:
+
+- The face lying on the table is dropped. The arm cannot get underneath it.
+- Opposite faces always tie on area, so the tie is broken by whichever face
+  centre is nearer the robot's base. That picks the side the arm can approach
+  without reaching over the box.
+
+Areas are rounded to a square millimetre before being compared, so that
+measurement noise cannot decide a tie between two faces that are really equal.
+
+## Touching
+
+The fingertip is driven 4 mm past where the face was measured to be. Stopping
+exactly on the measured surface would mean that a face measured a millimetre
+too far away never gets touched at all.
+
+The last few centimetres are run with collision checking turned off. The
+fingertip is being driven into the box deliberately, and the straight line
+starts from a standoff pose that was itself reached with collision checking on,
+so nothing else can be in the way.
+
+Contact sensors on both fingertips report whether the arm actually felt the
+face. That is what makes this a touch rather than a claim: without it, a
+measurement that was 2 cm wrong would still be reported as a success.
+
+## What breaks it
+
+- **Cuboids touching or stacked.** The clustering merges them and the fit
+  returns one box spanning both. This is the assumption the problem states, and
+  the code does not try to work around it.
+- **A cuboid too wide to grip.** The gripper opens to 80 mm, and the spawner
+  will not place a box unless one of its horizontal sides is 65 mm or less.
+  The 15 mm of margin is not spare capacity: a box almost as wide as the
+  gripper opens has to be approached with its yaw right to within a degree or
+  two, or a corner catches a finger. A real cell would need a plan for boxes it
+  cannot pick up at all.
+- **A viewpoint the arm cannot reach.** Skipped with a warning. The extra
+  angles exist to fill in what one view misses, so losing one costs accuracy
+  rather than the measurement. Losing all of them is an error.
+- **A box that shifts when touched.** Pressing on the side of a box moves it a
+  little, so its recorded position goes stale. That only matters for planning
+  around it afterwards, and the boxes are far enough apart that it has not
+  caused a collision.
+- **A crowded done side.** Three cuboids is what the table comfortably holds:
+  the arm reaches every slot and every run finishes all three. Four still runs,
+  but the extra slots sit further round to the side of the arm, and there the
+  planner sometimes cannot find a way to a slot, or a box works loose on the
+  long carry. Every one of those is caught, reported by name, and the run
+  carries on with the next cuboid rather than stopping. The honest summary is
+  that the cell is sized for three.
+- **Large ROS messages.** A 320x240 float depth image is around 300 kB, which
+  is past the default DDS socket buffers. Without `config/fastdds.xml` the
+  colour images arrive and the depth images mostly do not, and the failure is
+  silent — the topic simply runs at a fraction of its rate.
+
+## What is checked, and how
+
+`make test` runs 50 tests that need no simulator, covering the two modules
+where the logic lives:
+
+- **Geometry.** That a cuboid has six faces in three matching pairs; that the
+  three areas are the products of the side pairs; that a flat box is touched on
+  top and a tall one on its side; that the face against the table is never
+  chosen; that a tie goes to the face nearer the arm; and that yaw turns the
+  side normals with the box.
+- **Box fitting.** A cuboid of a known size and yaw is turned into the points a
+  camera looking down on it would see — top face and two visible sides, nothing
+  more — and the fit has to give the numbers back. Six yaws and three shapes,
+  including the ones that make the two horizontal sides swap over. Two boxes
+  set apart have to come back as two clusters and two independent measurements.
+- **Transforms.** That a rotation survives the round trip through a quaternion,
+  including the rotations whose quaternion has a near-zero scalar part; that a
+  tool orientation really points where it was told; and that two viewpoints a
+  few centimetres apart do not come out a quarter turn apart.
+
+Beyond that, the only real test is running it. The measurements above were
+checked against the sizes and positions the simulator was told to spawn, which
+`gz model -m cuboid_0 -p` will print.
+
+## Debugging
+
+```
+make cell                          # bring the cell up without running the task
+ros2 topic hz /wrist_camera/depth_image   # 15 Hz, or the transport is dropping frames
+ros2 control list_controllers             # all three should be active
+gz model -m cuboid_0 -p                   # where a cuboid really is, to check a measurement
+make run RVIZ=true                        # see what MoveIt is planning against
+```
+
+Gazebo prints `Unable to load Ogre Plugin ... Rendering will not be possible`
+on macOS. Rendering does in fact work; the camera topics carry real images.
+
+If nothing at all reaches the ROS side, check for leftover processes from an
+earlier run. A simulator killed rather than shut down leaves its ROS endpoints
+registered, and the publishers that are still alive stall waiting on them.

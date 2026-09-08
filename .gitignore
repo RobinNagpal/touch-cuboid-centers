@@ -1,0 +1,21 @@
+# pixi
+.pixi/
+
+# colcon
+build/
+install/
+log/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# editors / IDEs
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
