@@ -244,6 +244,12 @@ make run RVIZ=true                        # see what MoveIt is planning against
 Gazebo prints `Unable to load Ogre Plugin ... Rendering will not be possible`
 on macOS. Rendering does in fact work; the camera topics carry real images.
 
+The simulator is always started as a server on its own, and `GUI=true` adds a
+second process that connects to it. On macOS `gz sim` refuses to be both at
+once, because the window has to own the main thread; it exits immediately with
+a message saying so. Running them apart works on every platform, so there is no
+per-platform branch in the launch file.
+
 If nothing at all reaches the ROS side, check for leftover processes from an
 earlier run. A simulator killed rather than shut down leaves its ROS endpoints
 registered, and the publishers that are still alive stall waiting on them.

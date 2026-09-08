@@ -15,10 +15,12 @@ from cuboid_cell.world import build_world, random_cuboids
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
     RegisterEventHandler,
     SetEnvironmentVariable,
+    TimerAction,
 )
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
@@ -72,14 +74,24 @@ def setup(context, *args, **kwargs):
     gui = LaunchConfiguration("gui").perform(context).lower() in ("true", "1")
 
     world = write_world(share, cuboids, seed)
-    gz_args = f"-r -v 2 {world}" if gui else f"-s -r -v 2 --headless-rendering {world}"
 
+    # The simulator always runs as a server on its own, and the window, when
+    # there is one, is a second process that connects to it. That is not a
+    # preference: on macOS `gz sim` refuses to be both in one process, because
+    # the window has to own the main thread. Splitting them is fine everywhere,
+    # so there is no per-platform branch here.
     return [
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(get_package_share_directory("ros_gz_sim"), "launch", "gz_sim.launch.py")
             ),
-            launch_arguments={"gz_args": gz_args}.items(),
+            launch_arguments={"gz_args": f"-s -r -v 2 --headless-rendering {world}"}.items(),
+        ),
+        # Given a few seconds so the server is up and has a scene to send it.
+        *(
+            [TimerAction(period=5.0, actions=[ExecuteProcess(cmd=["gz", "sim", "-g"], output="screen")])]
+            if gui
+            else []
         ),
         Node(
             package="robot_state_publisher",
