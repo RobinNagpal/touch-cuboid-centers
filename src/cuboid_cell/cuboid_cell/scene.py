@@ -30,6 +30,11 @@ class PlanningSceneClient:
         self._client = node.create_client(ApplyPlanningScene, "/apply_planning_scene")
         self._known: set[str] = set()
 
+    def wait_until_ready(self, timeout: float = 120.0) -> None:
+        """Block until move_group is serving edits to the planning scene."""
+        if not self._client.wait_for_service(timeout_sec=timeout):
+            raise RuntimeError(f"/apply_planning_scene did not come up within {timeout:.0f}s")
+
     def _apply(self, objects: list[CollisionObject], attached=()) -> None:
         if not self._client.wait_for_service(timeout_sec=10.0):
             raise RuntimeError("/apply_planning_scene is not available")

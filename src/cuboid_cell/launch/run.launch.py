@@ -76,8 +76,9 @@ def generate_launch_description() -> LaunchDescription:
             ),
             cell,
             move_group,
-            # Gazebo has to be up, the controllers claimed and the first camera
-            # frames published before the task has anything to work with.
-            TimerAction(period=25.0, actions=[task]),
+            # A head start for Gazebo and move_group. It does not have to be
+            # long enough on its own: the task waits for the controllers, the
+            # planning scene service and the first camera frames itself.
+            TimerAction(period=10.0, actions=[task]),
         ]
     )
