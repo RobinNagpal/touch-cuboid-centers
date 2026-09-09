@@ -30,8 +30,8 @@ Robots publish `ur_description` themselves, so the link lengths, masses and
 joint limits in this repo are the manufacturer's numbers rather than something
 approximated. It has 850 mm of reach, which comfortably covers a table the arm
 is standing on. Nothing in the code is UR-specific; `ur_type` in the xacro would
-take `ur3e` or `ur10e` just as well, though the zones in `cell.py` would need
-to shrink or grow to match the new reach.
+take `ur3e` or `ur10e` just as well, though the zones in `table/layout.py`
+would need to shrink or grow to match the new reach.
 
 ### The gripper: written here, not borrowed
 
@@ -53,7 +53,7 @@ The problem says the camera moves with the arm, which is also the more useful
 arrangement: pointing the tool at something is the same as pointing the camera
 at it, and the arm can walk the camera around a box to see sides that were
 hidden from the first viewpoint. The cost is that a frame is only meaningful
-together with the arm pose it was taken at, which is why `camera.py` hands back
+together with the arm pose it was taken at, which is why the camera hands back
 the image and the camera-to-world transform together rather than separately.
 
 ### The planner: MoveIt, mostly in-process
@@ -170,9 +170,10 @@ so this needs no iteration and no initial guess. Two details:
   quarter turn to match when they swap. Without that, a box would change its
   reported orientation as it rotated past 45 degrees.
 
-The table height is taken from `cell.py` rather than fitted from the data. The
-table is a fixed part of the cell — it is the surface the arm is bolted to —
-so its height is known in the same way the arm's own dimensions are known.
+The table height is taken from `table/layout.py` rather than fitted from the
+data. The table is a fixed part of the cell — it is the surface the arm is
+bolted to — so its height is known in the same way the arm's own dimensions
+are known.
 
 Measured against the sizes the simulator was told to spawn, the fits come out
 within about a millimetre.
@@ -238,7 +239,7 @@ measurement that was 2 cm wrong would still be reported as a success.
   cloud and measured as a single large box, and a wrong answer delivered
   confidently is worse than a refusal.
 - **Large ROS messages.** A 320x240 float depth image is around 300 kB, which
-  is past the default DDS socket buffers. Without `config/fastdds.xml` the
+  is past the default DDS socket buffers. Without `world/fastdds.xml` the
   colour images arrive and the depth images mostly do not, and the failure is
   silent — the topic simply runs at a fraction of its rate.
 

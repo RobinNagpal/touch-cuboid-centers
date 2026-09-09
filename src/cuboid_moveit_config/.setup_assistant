@@ -1,9 +1,0 @@
-# Tells MoveItConfigsBuilder which model this configuration describes. The
-# robot itself lives in cuboid_cell so that the simulator and MoveIt are
-# always looking at the same URDF.
-moveit_setup_assistant_config:
-  urdf:
-    package: cuboid_cell
-    relative_path: urdf/cell.urdf.xacro
-  srdf:
-    relative_path: config/cell.srdf

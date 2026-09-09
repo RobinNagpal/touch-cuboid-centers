@@ -7,44 +7,90 @@ touch-cuboid-centers/
 ├── Makefile                     the only entry point people use
 ├── pixi.toml                    every dependency, pinned in pixi.lock
 └── src/
-    ├── cuboid_cell/             the work cell and the task that runs in it
-    │   ├── urdf/                the robot: arm, gripper, camera
-    │   ├── worlds/cell.sdf      the room, the light and the table
-    │   ├── config/              controllers, the ROS <-> Gazebo bridge, RViz
+    ├── work_cell/               the cell and the task that runs in it
     │   ├── launch/              how it all gets started
-    │   ├── cuboid_cell/         the Python that does the work
-    │   └── test/                tests that need no simulator
-    └── cuboid_moveit_config/    what MoveIt needs to know about the robot
+    │   ├── test/                tests that need no simulator
+    │   └── work_cell/
+    │       ├── arm/             the arm: model, controllers, motion
+    │       │   └── camera/      the camera bolted to its wrist
+    │       ├── table/           the table, and the two halves of it
+    │       ├── cuboids/         the boxes: inventing, measuring, geometry
+    │       ├── world/           the room, and the bridge into ROS
+    │       ├── task.py          the workflow
+    │       ├── scene.py         what MoveIt is told about the room
+    │       └── transforms.py    shared maths
+    └── work_cell_moveit_config/ what MoveIt needs to know about the robot
 ```
+
+## Why the folders are shaped like this
+
+One folder per thing in the room. `arm/` holds everything about the arm — the
+model the simulator loads, the controller settings, the code that moves it —
+and `table/`, `cuboids/` and `world/` do the same for theirs.
+
+The alternative, and the more common ROS layout, is one folder per file type:
+all the models together, all the YAML together, all the Python together.
+That reads well when you already know the project, because you know what kind
+of file you are looking for. It reads badly when you do not, because answering
+"how is the gripper set up?" means opening three folders and knowing in advance
+which three.
+
+Grouping by subject means a question about the arm is answered in one place. It
+costs one thing: `.xacro` and `.yaml` files sit next to `.py` files, which is
+unusual to look at. `setup.py` installs them to the same places ROS expects, so
+nothing downstream notices.
+
+
 
 ## Why two packages
 
-`cuboid_moveit_config` holds only configuration: a semantic description of the
+`work_cell_moveit_config` holds only configuration: a semantic description of the
 robot (which joints are the arm, which are the gripper, which pairs of links
 are allowed to touch) and the planner settings. That is the layout MoveIt's own
 tooling expects, and keeping it separate means the robot itself is described in
-exactly one place — `cuboid_cell/urdf/cell.urdf.xacro` — and both the simulator
+exactly one place — `work_cell/arm/arm.urdf.xacro` — and both the simulator
 and MoveIt read that same file.
 
-## cuboid_cell
+## work_cell
 
-### The model
-
-| File | What it owns |
-| --- | --- |
-| `urdf/cell.urdf.xacro` | The whole robot. Pulls the UR5e in from `ur_description`, adds the gripper and camera, and declares which joints `ros2_control` may drive. |
-| `urdf/gripper.urdf.xacro` | The two-finger gripper, its friction, and the fingertip contact sensors. |
-| `urdf/wrist_camera.urdf.xacro` | The RGB-D camera and the two frames a ROS camera needs. |
-| `worlds/cell.sdf` | Physics, lighting, the ground and the table. Has a `<!-- CUBOIDS -->` line that the launch fills in. |
-
-### The configuration
+### The arm
 
 | File | What it owns |
 | --- | --- |
-| `config/controllers.yaml` | The three `ros2_control` controllers: joint states, the arm, the gripper. |
-| `config/gz_bridge.yaml` | Every topic that has to cross from Gazebo into ROS. |
-| `config/fastdds.xml` | Middleware buffer sizes, without which depth images do not arrive. |
-| `config/view.rviz` | The RViz layout, used only with `RVIZ=true`. |
+| `arm/arm.urdf.xacro` | The whole robot. Pulls the UR5e in from `ur_description`, adds the gripper and camera, and declares which joints `ros2_control` may drive. |
+| `arm/gripper.urdf.xacro` | The two-finger gripper, its friction, and the fingertip contact sensors. |
+| `arm/controllers.yaml` | The three `ros2_control` controllers: joint states, the arm, the gripper. |
+| `arm/dimensions.py` | The measurements the model does not carry: fingertip reach, camera offset, working heights. |
+| `arm/motion.py` | The `Arm` class: planning, straight lines, gripping, feeling. |
+| `arm/camera/wrist_camera.urdf.xacro` | The RGB-D sensor, and the two frames a ROS camera needs. |
+| `arm/camera/wrist_camera.py` | The `WristCamera` class: a frame plus the pose the camera was at. |
+
+### The table
+
+| File | What it owns |
+| --- | --- |
+| `table/table.sdf` | The table itself, spliced into the world at run time. |
+| `table/layout.py` | Where the table is, and the two zones on it. The frame everything else is measured in. |
+
+### The cuboids
+
+| File | What it owns |
+| --- | --- |
+| `cuboids/cuboid.sdf` | One box, with blanks in it. |
+| `cuboids/spec.py` | What a cuboid may be: size range, density, colours, spacing. |
+| `cuboids/spawn.py` | Inventing this run's boxes and writing them as models. |
+| `cuboids/perception.py` | RGB-D frames to cuboids: masking, back-projection, clustering, box fitting. |
+| `cuboids/geometry.py` | A cuboid, its six faces, their areas, and which face to touch. Pure maths. |
+
+### The world
+
+| File | What it owns |
+| --- | --- |
+| `world/cell.sdf` | Physics, lighting, the ground, and the window's opening view. Two marker lines say where the table and the cuboids go. |
+| `world/build.py` | Assembling the room, the table and the cuboids into one world file. |
+| `world/gz_bridge.yaml` | Every topic that has to cross from Gazebo into ROS. |
+| `world/fastdds.xml` | Middleware buffer sizes, without which depth images do not arrive. |
+| `world/view.rviz` | The RViz layout, used only with `RVIZ=true`. |
 
 ### The code
 
@@ -65,18 +111,27 @@ about when it is used. `arm.py` knows how to move the arm somewhere, not that a
 survey comes before a grasp. So a change to the workflow is a change to one
 file.
 
-| Module | What it owns | Depends on |
-| --- | --- | --- |
-| `cell.py` | Every number describing the cell: table height, the two zones, gripper offsets, working heights. | nothing |
-| `geometry.py` | A cuboid, its six faces, their areas, and which face to touch. Pure maths. | `cell.py` |
-| `perception.py` | RGB-D frames to cuboids: masking, back-projection, clustering, box fitting. | `geometry.py` |
-| `transforms.py` | Conversions between ROS poses and 4x4 matrices, and building a tool orientation from a direction. | nothing |
-| `world.py` | Generating the random cuboids and writing them into the world file. | `cell.py` |
-| `camera.py` | The wrist camera as one object: a frame plus the pose the camera was at. | `perception.py`, `transforms.py` |
-| `arm.py` | The arm, the gripper and the contact sensors. Planning, straight-line moves, gripping, feeling. | `transforms.py` |
-| `scene.py` | What MoveIt is told about the table, the cuboids, and the box currently in the gripper. | `geometry.py`, `transforms.py` |
-| `task.py` | The workflow. The only module that knows the order things happen in. | all of the above |
-| `main.py` | Wiring, and the executor thread the workflow blocks against. | `task.py` |
+| Module | Depends on |
+| --- | --- |
+| `table/layout.py` | nothing |
+| `arm/dimensions.py` | nothing |
+| `cuboids/spec.py` | nothing |
+| `cuboids/geometry.py` | nothing |
+| `cuboids/perception.py` | `cuboids/geometry.py` |
+| `cuboids/spawn.py` | `cuboids/spec.py`, `arm/dimensions.py`, `table/layout.py` |
+| `world/build.py` | `cuboids/spawn.py` |
+| `transforms.py` | nothing |
+| `arm/camera/wrist_camera.py` | `cuboids/perception.py`, `transforms.py`, `table/layout.py` |
+| `arm/motion.py` | `transforms.py`, `table/layout.py` |
+| `scene.py` | `cuboids/geometry.py`, `transforms.py`, `table/layout.py` |
+| `task.py` | all of the above |
+| `main.py` | `task.py` |
+
+The one arrow that looks backwards is the camera depending on the cuboids: it
+hands back the camera's intrinsics, and those are defined in `perception.py`
+because that is what consumes them. Moving them into the camera would drag ROS
+into `perception.py` and cost the tests their simulator-free run, which is a
+worse trade than one odd-looking arrow.
 
 ### The launch files
 

@@ -28,11 +28,11 @@ help: ## Show this help
 ##@ Running
 
 run: build ## Start the cell and run the task (this is the one command)
-	$(call ros,ros2 launch cuboid_cell run.launch.py \
+	$(call ros,ros2 launch work_cell run.launch.py \
 		cuboids:=$(CUBOIDS) seed:=$(SEED) gui:=$(GUI) rviz:=$(RVIZ))
 
 cell: build ## Start the cell but leave the arm alone, for poking at by hand
-	$(call ros,ros2 launch cuboid_cell run.launch.py task:=false \
+	$(call ros,ros2 launch work_cell run.launch.py task:=false \
 		cuboids:=$(CUBOIDS) seed:=$(SEED) gui:=$(GUI) rviz:=$(RVIZ))
 
 ##@ Project
@@ -44,7 +44,7 @@ build: setup ## Build the workspace
 	@pixi run colcon build --symlink-install
 
 test: build ## Run the tests
-	$(call ros,pytest src/cuboid_cell/test -q)
+	$(call ros,pytest src/work_cell/test -q)
 
 lint: setup ## Check code style
 	pixi run ruff check src/

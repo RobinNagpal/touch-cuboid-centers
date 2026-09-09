@@ -141,7 +141,9 @@ as one.
 
 ## Reading further
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — what each file is for, how they fit
-  together, and why the pieces are split up the way they are.
+- [`PSEUDOCODE.md`](PSEUDOCODE.md) — what every file and function is for, and
+  what calls what when you type `make run`.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — the folder layout, and why the pieces
+  are split up the way they are.
 - [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md) — why each choice was
   made, the maths behind the measuring, and what breaks it.

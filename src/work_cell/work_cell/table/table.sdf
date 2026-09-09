@@ -1,0 +1,44 @@
+<!--
+  The table. Its top sits at z = 0.75, which is the plane the arm, the
+  cuboids and table/layout.py all measure from.
+
+  Grey on purpose: the cuboids are the only saturated colours in the cell,
+  and that is what the measuring step keys on to tell them from the table.
+
+  world/build.py splices this into the world file at its table marker.
+-->
+    <model name="table">
+      <static>true</static>
+      <pose>0.35 0 0 0 0 0</pose>
+      <link name="link">
+        <collision name="top_collision">
+          <pose>0 0 0.725 0 0 0</pose>
+          <geometry><box><size>1.4 1.2 0.05</size></box></geometry>
+          <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction></surface>
+        </collision>
+        <visual name="top_visual">
+          <pose>0 0 0.725 0 0 0</pose>
+          <geometry><box><size>1.4 1.2 0.05</size></box></geometry>
+          <material>
+            <ambient>0.55 0.55 0.56 1</ambient>
+            <diffuse>0.68 0.68 0.70 1</diffuse>
+          </material>
+        </visual>
+        <visual name="leg_a"><pose>0.63 0.53 0.35 0 0 0</pose>
+          <geometry><box><size>0.06 0.06 0.7</size></box></geometry>
+          <material><ambient>0.3 0.3 0.32 1</ambient><diffuse>0.4 0.4 0.42 1</diffuse></material>
+        </visual>
+        <visual name="leg_b"><pose>0.63 -0.53 0.35 0 0 0</pose>
+          <geometry><box><size>0.06 0.06 0.7</size></box></geometry>
+          <material><ambient>0.3 0.3 0.32 1</ambient><diffuse>0.4 0.4 0.42 1</diffuse></material>
+        </visual>
+        <visual name="leg_c"><pose>-0.63 0.53 0.35 0 0 0</pose>
+          <geometry><box><size>0.06 0.06 0.7</size></box></geometry>
+          <material><ambient>0.3 0.3 0.32 1</ambient><diffuse>0.4 0.4 0.42 1</diffuse></material>
+        </visual>
+        <visual name="leg_d"><pose>-0.63 -0.53 0.35 0 0 0</pose>
+          <geometry><box><size>0.06 0.06 0.7</size></box></geometry>
+          <material><ambient>0.3 0.3 0.32 1</ambient><diffuse>0.4 0.4 0.42 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
