@@ -67,23 +67,53 @@ services: straight-line Cartesian paths, and edits to the planning scene. The
 in-process planner is configured to watch the scene `move_group` publishes, so
 adding the table in one place makes it visible in both.
 
-### Gripping, and why the grip is gentle
+### Gripping: how hard to squeeze
 
-The finger joints are position controlled. Telling a position-controlled finger
-to be somewhere the box already is does not produce a firmer grip; it produces
-a rigid interference that the physics engine resolves by firing the box out
-sideways. So the fingers are told to close only 2 mm narrower than the box was
-measured to be, and the joints are given a 25 N effort limit — far more than
-the few newtons needed to hold a wooden block, far less than a finger driven at
-full strength into something it cannot squash.
+The fingers are told to close 4 mm narrower than the box was measured to be.
+That number cost more experiments than any other in the project, because it is
+squeezed from both sides.
 
-That leaves the question of how the arm knows it has hold of anything, because
-2 mm is not a difference in finger travel worth trusting. The answer is the
-fingertip contact sensors: they are checked once when the fingers close, and
-again before the box is released at the other end of the table. A grasp that
-missed and a box that worked loose on the way over are both caught that way,
-and both are reported by name rather than being noticed later as a box that
-went missing.
+It cannot be much smaller. The measured width is only good to a millimetre or
+two, so on a box read slightly too wide, a 2 mm squeeze has the fingers stop
+before they ever reach it. That failure looks exactly like a successful grasp
+until the arm lifts an empty gripper.
+
+It cannot be much larger either, and the reason is worth understanding. The
+finger joints are position controlled: they are told where to be, not how hard
+to push. Telling a finger to be somewhere the box already is does not squeeze
+harder, it asks the physics engine to resolve two solid objects occupying the
+same space, and the way it resolves that is by shooting the box out sideways.
+A 6 mm squeeze lost boxes mid-carry for exactly this reason.
+
+The joints also carry a 25 N effort limit. A wooden block needs a few newtons
+to hold, so 25 N is generous, while a finger driven at full strength into
+something it cannot squash is what flings it.
+
+That leaves the question of how the arm knows it is holding anything, since
+4 mm of finger travel is not a difference worth trusting. The fingertip contact
+sensors answer it directly. They are read when the fingers close, and again
+before the box is released at the far side. A grasp that missed and a box that
+worked loose on the way over are both caught the moment they happen, and both
+are reported, rather than being noticed later as a box that went missing.
+
+### Starting up: waiting rather than guessing
+
+A simulated robot cell does not come up all at once. Gazebo starts, the robot
+is spawned into it, the controllers claim the joints, MoveIt loads its planners,
+and the camera begins publishing — in that order, over tens of seconds.
+
+The first version of this simply waited 25 seconds before starting the task,
+which is the wrong shape of answer. A fixed delay is a guess about someone
+else's machine. It wastes time when the guess is too long, and fails when it is
+too short, and it is silently too short in exactly the case you notice last:
+opening the Gazebo window slows startup down, so a delay tuned on headless runs
+was not enough once there was something to watch.
+
+So the task waits for the things themselves. Before it does anything it blocks
+until the planning scene service answers, both controllers accept goals, and
+the first camera frames have arrived. The launch file still gives the cell a
+ten second head start, but only so the logs are not full of waiting; the run
+is correct whether or not that head start was long enough.
 
 ## How the measuring works
 
@@ -202,6 +232,11 @@ measurement that was 2 cm wrong would still be reported as a success.
   went wrong, the box stays on the pending side, and the next pass tries it
   again, up to twice as many attempts as there are cuboids. In the run this was
   measured on, one of the four took four attempts and all four finished.
+- **Too many cuboids.** Above four, the spawner cannot place boxes far enough
+  apart to be sure none of them touch, and it stops with an error before the
+  run starts. That is deliberate. Two boxes touching would be grouped into one
+  cloud and measured as a single large box, and a wrong answer delivered
+  confidently is worse than a refusal.
 - **Large ROS messages.** A 320x240 float depth image is around 300 kB, which
   is past the default DDS socket buffers. Without `config/fastdds.xml` the
   colour images arrive and the depth images mostly do not, and the failure is

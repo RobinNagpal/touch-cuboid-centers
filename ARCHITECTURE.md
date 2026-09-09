@@ -48,7 +48,22 @@ and MoveIt read that same file.
 
 ### The code
 
-Each module has one job, and they only depend downwards.
+Each module has one job, and the dependencies only point downwards: nothing in
+the table below depends on anything beneath it.
+
+That ordering is not tidiness for its own sake. It buys two specific things.
+
+The first is testing. The modules at the top — the cuboid geometry and the box
+fitting — import no ROS at all. They are given numbers and hand numbers back.
+That is why 50 tests can run in under a second with no simulator, and why the
+part of the code most likely to be wrong is also the part that is easiest to
+check.
+
+The second is that only one module knows what order things happen in. `task.py`
+holds the workflow; everything below it offers a capability and has no opinion
+about when it is used. `arm.py` knows how to move the arm somewhere, not that a
+survey comes before a grasp. So a change to the workflow is a change to one
+file.
 
 | Module | What it owns | Depends on |
 | --- | --- | --- |
@@ -63,21 +78,34 @@ Each module has one job, and they only depend downwards.
 | `task.py` | The workflow. The only module that knows the order things happen in. | all of the above |
 | `main.py` | Wiring, and the executor thread the workflow blocks against. | `task.py` |
 
-`geometry.py` and `perception.py` import no ROS at all, which is why the tests
-can run them directly.
-
 ### The launch files
 
 `launch/cell.launch.py` brings up the cell:
 
 1. writes a world file with freshly generated cuboids in it;
-2. points Gazebo's search paths at the ROS install prefixes;
-3. starts Gazebo, `robot_state_publisher`, and spawns the robot into the world;
-4. starts the ROS <-> Gazebo bridge;
-5. starts the three controllers, one after another.
+2. points Gazebo's search paths at the ROS install prefixes, because Gazebo
+   does not know about ROS packages and would not find the arm's meshes;
+3. starts the Gazebo server, `robot_state_publisher`, and spawns the robot;
+4. starts the Gazebo window, if one was asked for, as a separate process;
+5. starts the ROS <-> Gazebo bridge;
+6. starts the three controllers, one after another.
+
+Two of those steps are ordered the way they are for a reason.
+
+The window is a second process rather than part of the server because macOS
+will not have it any other way: a window has to own the main thread, and
+`gz sim` exits rather than try. Running them apart works everywhere, so there
+is no per-platform branch.
+
+The controllers are started one after another rather than all at once because
+three spawners racing into a controller manager that is still waking up is
+enough for one of them to try to configure a controller another has already
+started.
 
 `launch/run.launch.py` adds MoveIt's `move_group` and the task node, and is what
-`make run` calls.
+`make run` calls. It gives the cell a ten second head start, but the task does
+not depend on that being long enough — it waits for the controllers, the
+planning scene service and the first camera frames itself.
 
 ## Nodes and topics
 
@@ -98,4 +126,9 @@ can run them directly.
 
 The task node holds MoveIt's planner inside itself, so free moves are planned
 in process. Straight-line moves and changes to the planning scene go through
-`move_group`, because those are services rather than library calls.
+`move_group`, because MoveIt only offers those as services.
+
+That split means there are two copies of the planning scene in play, which
+would be a bug waiting to happen. It is avoided by making one of them the
+authority: the in-process planner is configured to watch the scene `move_group`
+publishes, so the table is added in one place and both see it.

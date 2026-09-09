@@ -15,15 +15,53 @@ The first run downloads the environment, which is a few gigabytes.
 
 Cuboids of different sizes sit on a table. For each of them the arm has to:
 
-- pick it up and set it down on the other half of the table, so the side it
-  started on always holds exactly the boxes that are still to do;
+- pick it up and set it down on the other half of the table;
 - measure its length, width and height using a camera;
 - work out the area of its three different faces — length x width, length x
   height, width x height — and find the biggest one;
 - reach out and touch the centre of that face.
 
-The cuboids are assumed to be set apart from each other, not touching and not
-stacked.
+The first step is the interesting one, and it is worth saying why it is there.
+The arm has no memory of which box is which. Every time it looks at the table
+it sees a fresh set of coloured shapes, and nothing in a picture says whether
+this is a box it has already dealt with. Moving a box across the table solves
+that without any bookkeeping at all: the near half holds the boxes still to do,
+the far half holds the ones that are done, and the arm can tell them apart by
+looking. The to-do list is the table itself.
+
+One thing is assumed: the cuboids are set apart from each other, not touching
+and not stacked.
+
+## How it works
+
+Each cuboid goes through the same five steps.
+
+**1. Look at the near half of the table.** The arm carries the camera to three
+viewpoints above it and takes a picture at each one. Three rather than one,
+because a tall box can hide a short one from a single angle.
+
+**2. Turn the pictures into boxes.** The cuboids are the only strongly coloured
+things in the cell, so colour alone separates them from the grey table. Those
+pixels have a depth reading, and depth plus the arm's own pose puts each pixel
+at a point in the room. Grouping the points that sit near each other gives one
+cloud per box, and the smallest rectangle that encloses a cloud seen from above
+is that box's footprint.
+
+**3. Carry one box to the far half.** The arm takes the nearest one, closes its
+fingers on the shorter of the two horizontal sides — the only one that fits
+between them — lifts it across and sets it down.
+
+**4. Measure it properly, on its own.** The arm looks again from three closer
+viewpoints. This second look is the one the answer is worked out from, for two
+reasons. The box is now alone, with nothing beside it to confuse the grouping.
+And a box that has been picked up and put down does not always land on the face
+it started on, so its old measurements may describe a box that no longer exists.
+
+**5. Work out the biggest face and touch it.** Six faces, but only three
+different areas, because opposite faces match. The biggest one wins, except
+that the face lying on the table is ignored, since the arm cannot get
+underneath it. The arm then lines up a short distance out from the centre of
+that face and moves straight in until its fingertips press against it.
 
 ## What it looks like when it runs
 
@@ -49,14 +87,12 @@ stacked.
 ```
 
 The three cuboids in that run were really 7.9 x 4.1 x 4.5, 7.8 x 4.7 x 8.2 and
-6.1 x 8.6 x 8.6 cm. The first survey reads them off the pending side to the
-nearest millimetre or so. Each one is then measured again once it has been moved,
-which is the number the face areas are worked out from, because a box that has
-been picked up and set down does not always land on the face it started on.
+6.1 x 8.6 x 8.6 cm, so the camera reads them to about a millimetre.
 
-`contact yes` at the end means the fingertip sensor felt the face. It is the
-difference between the arm reaching the place it calculated and the arm
-actually touching the box.
+`contact yes` is the fingertip sensor reporting that it felt the face. Without
+it, a measurement that was two centimetres wrong would still be logged as a
+success, because the arm would have gone exactly where it calculated. The
+sensor is what makes the last line a fact rather than a claim.
 
 ## The cell
 
@@ -92,13 +128,20 @@ make doctor     # print versions of everything that matters
 `make run` takes settings:
 
 ```
-make run CUBOIDS=5 SEED=12   # five cuboids, a different arrangement
+make run CUBOIDS=4 SEED=12   # four cuboids, a different arrangement
 make run GUI=false           # no Gazebo window, for a machine without a display
 make run RVIZ=true           # also open RViz to see what MoveIt is planning against
 ```
 
+Three is the number the table is really sized for, and those runs go through
+cleanly. Four fits and finishes, but leans on the arm retrying the odd box.
+Above four the cuboids cannot be spaced far enough apart to be sure they are
+not touching, and the run stops before it starts rather than measure two boxes
+as one.
+
 ## Reading further
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — what each file is for and how they fit together.
-- [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md) — why it is built this way, the
-  maths behind the measuring, and what breaks it.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — what each file is for, how they fit
+  together, and why the pieces are split up the way they are.
+- [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md) — why each choice was
+  made, the maths behind the measuring, and what breaks it.
