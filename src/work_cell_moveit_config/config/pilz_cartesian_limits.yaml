@@ -1,8 +1,0 @@
-# MoveIt asks for these whatever planner is configured. They are the ceiling on
-# how fast the tool is allowed to travel through space, as opposed to the
-# per-joint limits in joint_limits.yaml.
-cartesian_limits:
-  max_trans_vel: 0.5
-  max_trans_acc: 1.0
-  max_trans_dec: -1.0
-  max_rot_vel: 1.57
