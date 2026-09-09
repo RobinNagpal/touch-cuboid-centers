@@ -1,0 +1,29 @@
+# The URDF from ur_description carries the real position, velocity and effort
+# limits. Two things are added here.
+#
+# Acceleration limits, because Universal Robots do not publish them and MoveIt
+# needs one to work out how long a trajectory should take.
+#
+# Lower velocities than the arm is capable of, because this is a measuring
+# task: the camera is on the wrist, and an arm that whips into position
+# arrives still swinging.
+default_velocity_scaling_factor: 0.25
+default_acceleration_scaling_factor: 0.25
+
+joint_limits:
+  shoulder_pan_joint: &arm_limits
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+  shoulder_lift_joint: *arm_limits
+  elbow_joint: *arm_limits
+  wrist_1_joint: *arm_limits
+  wrist_2_joint: *arm_limits
+  wrist_3_joint: *arm_limits
+  left_finger_joint: &finger_limits
+    has_velocity_limits: true
+    max_velocity: 0.1
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  right_finger_joint: *finger_limits
