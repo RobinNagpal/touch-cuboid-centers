@@ -1,0 +1,180 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro">
+
+  <!--
+    A two-finger parallel gripper.
+
+    Both fingers are driven independently rather than one mimicking the other,
+    because a mimic joint has to be handled by the simulated hardware as well
+    as by the model, and two joints commanded to the same number needs nothing
+    special from anybody.
+
+    Along the tool's z axis:
+      0.000  tool0, the flange
+      0.050  the fingers start
+      0.170  the fingertips
+
+    The fingers are long on purpose. A leg is stood up with the gripper held
+    level beside it, and the table top is carried by one edge with the rest of
+    it sticking out past the fingertips, so the body of the gripper has to stay
+    well back from whatever the fingers are holding.
+  -->
+
+  <xacro:macro name="parallel_gripper" params="prefix parent">
+
+    <!-- The body is wide across the way the fingers open, to house their
+         travel, and slim the other way. The slim side is the one that faces
+         the floor when a leg is stood up with the gripper held level beside
+         it, halfway up the leg, so every centimetre of it is floor clearance. -->
+    <xacro:property name="body_depth" value="0.05"/>
+    <xacro:property name="body_width" value="0.11"/>
+    <xacro:property name="body_length" value="0.05"/>
+    <xacro:property name="finger_length" value="0.12"/>
+    <xacro:property name="finger_thickness" value="0.012"/>
+    <xacro:property name="finger_width" value="0.03"/>
+
+    <!--
+      Each finger grips through four small pads, in two rows of two, standing
+      a millimetre and a half proud of its face.
+
+      A flat finger pressed flat against a flat part touches it, as far as the
+      simulator is concerned, at one point, and a single point of contact can
+      stop a part sliding but cannot stop it turning. A leg held a few
+      millimetres off its middle swings round in the fingers as soon as it is
+      lifted, and a board held level by its edge tips out of them. Four pads
+      spread across each finger touch at four points, and the spread between
+      them is what resists the turn. Real grippers do the same with ridged or
+      rubber pads.
+
+      The tip row sits right at the fingertips, which is where a part lying on
+      the floor is gripped. The second row is further up, and comes into play
+      when the fingers reach deeper, over the table top's edge.
+    -->
+    <xacro:property name="pad_width" value="0.010"/>
+    <xacro:property name="pad_length" value="0.018"/>
+    <xacro:property name="pad_proud" value="0.0015"/>
+    <xacro:property name="pad_spread" value="0.010"/>
+    <xacro:property name="tip_row" value="${finger_length - 0.011}"/>
+    <xacro:property name="inner_row" value="${finger_length - 0.035}"/>
+
+    <!-- Out from the middle by half a finger and a pad, so travel 0 has the
+         two sets of pads just touching and the travel of both fingers adds up
+         to the gap between the gripping surfaces. -->
+    <xacro:property name="finger_home" value="${finger_thickness / 2 + pad_proud}"/>
+
+    <!-- Left unnamed on purpose. The URDF-to-SDF conversion only gives a
+         link's friction settings to collisions that carry the link's own
+         name, so a named pad would grip with default friction. Unnamed, the
+         pads become <finger>_collision_1 to _4, in the order declared. -->
+    <xacro:macro name="pad" params="x z face">
+      <collision>
+        <origin xyz="${x} ${face} ${z}"/>
+        <geometry><box size="${pad_width} ${2 * pad_proud} ${pad_length}"/></geometry>
+      </collision>
+      <visual>
+        <origin xyz="${x} ${face} ${z}"/>
+        <geometry><box size="${pad_width} ${2 * pad_proud} ${pad_length}"/></geometry>
+        <material name="pad_black"><color rgba="0.08 0.08 0.08 1"/></material>
+      </visual>
+    </xacro:macro>
+
+    <link name="${prefix}gripper_body">
+      <visual>
+        <origin xyz="0 0 ${body_length / 2}"/>
+        <geometry><box size="${body_depth} ${body_width} ${body_length}"/></geometry>
+        <material name="gripper_grey"><color rgba="0.25 0.25 0.28 1"/></material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${body_length / 2}"/>
+        <geometry><box size="${body_depth} ${body_width} ${body_length}"/></geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 ${body_length / 2}"/>
+        <mass value="0.8"/>
+        <inertia ixx="0.00083" ixy="0" ixz="0" iyy="0.00033" iyz="0" izz="0.00083"/>
+      </inertial>
+    </link>
+
+    <joint name="${prefix}gripper_mount" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}gripper_body"/>
+      <origin xyz="0 0 0"/>
+    </joint>
+
+    <xacro:macro name="finger" params="side reflect">
+      <link name="${prefix}${side}_finger">
+        <visual>
+          <origin xyz="0 0 ${finger_length / 2}"/>
+          <geometry><box size="${finger_width} ${finger_thickness} ${finger_length}"/></geometry>
+          <material name="finger_grey"><color rgba="0.6 0.6 0.62 1"/></material>
+        </visual>
+        <collision>
+          <origin xyz="0 0 ${finger_length / 2}"/>
+          <geometry><box size="${finger_width} ${finger_thickness} ${finger_length}"/></geometry>
+        </collision>
+        <xacro:pad x="${pad_spread}" z="${tip_row}" face="${-reflect * finger_thickness / 2}"/>
+        <xacro:pad x="${-pad_spread}" z="${tip_row}" face="${-reflect * finger_thickness / 2}"/>
+        <xacro:pad x="${pad_spread}" z="${inner_row}" face="${-reflect * finger_thickness / 2}"/>
+        <xacro:pad x="${-pad_spread}" z="${inner_row}" face="${-reflect * finger_thickness / 2}"/>
+        <inertial>
+          <origin xyz="0 0 ${finger_length / 2}"/>
+          <mass value="0.05"/>
+          <inertia ixx="2.2e-5" ixy="0" ixz="0" iyy="2.2e-5" iyz="0" izz="4.0e-6"/>
+        </inertial>
+      </link>
+
+      <joint name="${prefix}${side}_finger_joint" type="prismatic">
+        <parent link="${prefix}gripper_body"/>
+        <child link="${prefix}${side}_finger"/>
+        <origin xyz="0 ${reflect * finger_home} ${body_length}"/>
+        <axis xyz="0 ${reflect} 0"/>
+        <!-- 25 N is the grip. It is far more than the few newtons needed to
+             hold a leg or a light board against gravity, and far less than a
+             finger driven at full strength into a part it cannot squash, which
+             sends the part shooting out sideways. -->
+        <limit lower="0.0" upper="0.04" effort="25.0" velocity="0.1"/>
+      </joint>
+    </xacro:macro>
+
+    <xacro:finger side="left" reflect="1"/>
+    <xacro:finger side="right" reflect="-1"/>
+
+    <!-- Grip needs friction, and a part squeezed between two frictionless
+         plates just squirts out. -->
+    <xacro:macro name="finger_surface" params="link">
+      <gazebo reference="${link}">
+        <mu1>1.6</mu1>
+        <mu2>1.6</mu2>
+        <kp>1e6</kp>
+        <kd>100.0</kd>
+      </gazebo>
+    </xacro:macro>
+    <xacro:finger_surface link="${prefix}left_finger"/>
+    <xacro:finger_surface link="${prefix}right_finger"/>
+
+    <!-- Contact sensors on the tip-row pads, which every grip in this task
+         lands on. They are how the arm knows it is really holding a part,
+         rather than assuming so because the fingers closed. A contact sensor
+         watches one collision, so there is one per pad.
+
+         The collision names are the ones the URDF-to-SDF conversion gives the
+         pads: the finger's own collision is <finger>_collision, and the pads
+         follow it as _1 to _4 in the order they are declared above. -->
+    <xacro:macro name="pad_contact" params="side pad index">
+      <gazebo reference="${prefix}${side}_finger">
+        <sensor name="${side}_pad_${pad}_contact" type="contact">
+          <always_on>true</always_on>
+          <update_rate>60</update_rate>
+          <contact>
+            <collision>${prefix}${side}_finger_collision_${index}</collision>
+          </contact>
+        </sensor>
+      </gazebo>
+    </xacro:macro>
+    <xacro:pad_contact side="left" pad="tip_a" index="1"/>
+    <xacro:pad_contact side="left" pad="tip_b" index="2"/>
+    <xacro:pad_contact side="right" pad="tip_a" index="1"/>
+    <xacro:pad_contact side="right" pad="tip_b" index="2"/>
+
+  </xacro:macro>
+</robot>
