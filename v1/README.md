@@ -141,6 +141,8 @@ as one.
 
 ## Reading further
 
+- [`docs/`](docs/) — a walk through one run, one document per step, with the
+  pictures and the arithmetic for the parts that are hard to see in the code.
 - [`PSEUDOCODE.md`](PSEUDOCODE.md) — what every file and function is for, and
   what calls what when you type `make run`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the folder layout, and why the pieces
