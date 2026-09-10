@@ -1,0 +1,58 @@
+# Gazebo and ROS speak different message formats, so every topic that has to
+# cross between them is listed here. Everything is one way, out of Gazebo.
+#
+# Nothing about the wall or the parts crosses. The robot learns about them only
+# through the camera, the same as it would in a real room.
+
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/wrist_camera/image"
+  gz_topic_name: "/wrist_camera/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/wrist_camera/depth_image"
+  gz_topic_name: "/wrist_camera/depth_image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/wrist_camera/camera_info"
+  gz_topic_name: "/wrist_camera/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+
+# A contact sensor ignores the <topic> given in the model and always publishes
+# under its own full path, so those paths are what have to be named here. Each
+# fingertip pad has its own sensor, and all four report onto the one ROS topic:
+# the task only asks whether the fingers are touching something, not where.
+
+- ros_topic_name: "/fingertip_contacts"
+  gz_topic_name: "/world/assembly_cell/model/assembly_arm/link/left_finger/sensor/left_pad_tip_a_contact/contact"
+  ros_type_name: "ros_gz_interfaces/msg/Contacts"
+  gz_type_name: "gz.msgs.Contacts"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/fingertip_contacts"
+  gz_topic_name: "/world/assembly_cell/model/assembly_arm/link/left_finger/sensor/left_pad_tip_b_contact/contact"
+  ros_type_name: "ros_gz_interfaces/msg/Contacts"
+  gz_type_name: "gz.msgs.Contacts"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/fingertip_contacts"
+  gz_topic_name: "/world/assembly_cell/model/assembly_arm/link/right_finger/sensor/right_pad_tip_a_contact/contact"
+  ros_type_name: "ros_gz_interfaces/msg/Contacts"
+  gz_type_name: "gz.msgs.Contacts"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/fingertip_contacts"
+  gz_topic_name: "/world/assembly_cell/model/assembly_arm/link/right_finger/sensor/right_pad_tip_b_contact/contact"
+  ros_type_name: "ros_gz_interfaces/msg/Contacts"
+  gz_type_name: "gz.msgs.Contacts"
+  direction: GZ_TO_ROS

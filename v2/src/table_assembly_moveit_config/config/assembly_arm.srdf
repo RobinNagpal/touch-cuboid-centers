@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<robot name="assembly_arm">
+  <!--
+    The semantic half of the robot model: which joints make up the arm, which
+    make up the gripper, and which pairs of links MoveIt should stop checking
+    against each other.
+
+    No virtual joint is declared. The URDF already has a link called "world"
+    holding the arm down, so that is the frame MoveIt plans in.
+  -->
+
+  <group name="ur_manipulator">
+    <chain base_link="base_link" tip_link="tool0"/>
+  </group>
+
+  <group name="gripper">
+    <joint name="left_finger_joint"/>
+    <joint name="right_finger_joint"/>
+  </group>
+
+  <end_effector name="tool" parent_link="tool0" group="gripper" parent_group="ur_manipulator"/>
+
+  <!-- Elbow up, tool pointing down at the floor. Matches the initial joint
+       values in table_assembly/arm/arm.urdf.xacro. -->
+  <group_state name="ready" group="ur_manipulator">
+    <joint name="shoulder_pan_joint" value="0.0"/>
+    <joint name="shoulder_lift_joint" value="-1.5708"/>
+    <joint name="elbow_joint" value="1.5708"/>
+    <joint name="wrist_1_joint" value="-1.5708"/>
+    <joint name="wrist_2_joint" value="-1.5708"/>
+    <joint name="wrist_3_joint" value="0.0"/>
+  </group_state>
+
+  <group_state name="open" group="gripper">
+    <joint name="left_finger_joint" value="0.04"/>
+    <joint name="right_finger_joint" value="0.04"/>
+  </group_state>
+
+  <group_state name="closed" group="gripper">
+    <joint name="left_finger_joint" value="0.0"/>
+    <joint name="right_finger_joint" value="0.0"/>
+  </group_state>
+
+  <!-- Links joined by a joint always overlap a little at the seam, and links
+       bolted together by a fixed joint can never move apart, so checking
+       either pair for collisions only ever produces false alarms. -->
+  <disable_collisions link1="base_link_inertia" link2="shoulder_link" reason="Adjacent"/>
+  <disable_collisions link1="shoulder_link" link2="upper_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="forearm_link" link2="upper_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="forearm_link" link2="wrist_1_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_1_link" link2="wrist_2_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_2_link" link2="wrist_3_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_1_link" link2="wrist_3_link" reason="Never"/>
+
+  <disable_collisions link1="gripper_body" link2="wrist_3_link" reason="Adjacent"/>
+  <disable_collisions link1="gripper_body" link2="wrist_2_link" reason="Never"/>
+  <disable_collisions link1="gripper_body" link2="wrist_1_link" reason="Never"/>
+  <disable_collisions link1="gripper_body" link2="left_finger" reason="Adjacent"/>
+  <disable_collisions link1="gripper_body" link2="right_finger" reason="Adjacent"/>
+  <!-- The two fingers meet when the gripper is closed. -->
+  <disable_collisions link1="left_finger" link2="right_finger" reason="Default"/>
+  <disable_collisions link1="left_finger" link2="wrist_3_link" reason="Never"/>
+  <disable_collisions link1="right_finger" link2="wrist_3_link" reason="Never"/>
+  <disable_collisions link1="left_finger" link2="wrist_2_link" reason="Never"/>
+  <disable_collisions link1="right_finger" link2="wrist_2_link" reason="Never"/>
+</robot>

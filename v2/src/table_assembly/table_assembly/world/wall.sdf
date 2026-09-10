@@ -1,0 +1,24 @@
+<!--
+  The wall the table top leans against. Static: it is part of the room, and
+  nothing the arm does should be able to move it.
+
+  Grey on purpose. The robot tells parts from the room by how colourful they
+  are, and it finds the wall as a grey thing standing up off the floor.
+-->
+    <model name="{name}">
+      <static>true</static>
+      <pose>{x:.4f} {y:.4f} {z:.4f} {roll:.5f} {pitch:.5f} {yaw:.5f}</pose>
+      <link name="body">
+        <collision name="collision">
+          <geometry><box><size>{length:.4f} {width:.4f} {height:.4f}</size></box></geometry>
+          <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction></surface>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>{length:.4f} {width:.4f} {height:.4f}</size></box></geometry>
+          <material>
+            <ambient>{red:.3f} {green:.3f} {blue:.3f} 1</ambient>
+            <diffuse>{red:.3f} {green:.3f} {blue:.3f} 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>

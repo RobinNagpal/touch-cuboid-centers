@@ -1,0 +1,9 @@
+# Tells MoveItConfigsBuilder which model this configuration describes. The
+# robot itself lives in the table_assembly package so that the simulator and
+# MoveIt are always looking at the same URDF.
+moveit_setup_assistant_config:
+  urdf:
+    package: table_assembly
+    relative_path: arm/arm.urdf.xacro
+  srdf:
+    relative_path: config/assembly_arm.srdf

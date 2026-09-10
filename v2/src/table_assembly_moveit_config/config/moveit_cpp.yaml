@@ -1,0 +1,29 @@
+# Settings for MoveIt's C++/Python API, which is what the task node drives the
+# arm through.
+
+planning_scene_monitor_options:
+  name: "planning_scene_monitor"
+  robot_description: "robot_description"
+  joint_state_topic: "/joint_states"
+  attached_collision_object_topic: "/moveit_cpp/planning_scene_monitor"
+  publish_planning_scene_topic: "/moveit_cpp/publish_planning_scene"
+  # This does not make the task's planner follow move_group's scene, whatever
+  # its name suggests: the monitor still listens for changes on
+  # /planning_scene. table_assembly/scene.py applies every change to both
+  # scenes itself, which is what keeps the task's planner from planning
+  # through things it cannot see.
+  monitored_planning_scene_topic: "/monitored_planning_scene"
+  wait_for_initial_state_timeout: 10.0
+
+plan_request_params:
+  planning_pipeline: ompl
+  planner_id: "RRTConnectkConfigDefault"
+  planning_attempts: 6
+  planning_time: 10.0
+  max_velocity_scaling_factor: 0.25
+  max_acceleration_scaling_factor: 0.25
+
+# MoveIt's C++/Python API wants the pipeline list nested under a key, where
+# move_group wants it as a plain list. This is the nested form.
+planning_pipelines:
+  pipeline_names: ["ompl"]

@@ -1,0 +1,38 @@
+# The URDF from ur_description carries the real position, velocity and effort
+# limits. Two things are added here.
+#
+# Acceleration limits, because Universal Robots do not publish them and MoveIt
+# needs one to work out how long a trajectory should take.
+#
+# Lower velocities than the arm is capable of, because the camera is on the
+# wrist and an arm that whips into position arrives still swinging, and
+# because a part held by friction alone does not like being whipped either.
+default_velocity_scaling_factor: 0.25
+default_acceleration_scaling_factor: 0.25
+
+joint_limits:
+  shoulder_pan_joint: &arm_limits
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+  # The arm stands on the floor, so its upper arm must never point below
+  # level: lower than that, the elbow is at the floor. -90 degrees is the upper
+  # arm upright; this allows it to lean to within a few degrees of level either
+  # way. MoveIt's model of the arm alone thought it cleared the floor by a few
+  # millimetres in a pose where the simulated elbow ground into it.
+  shoulder_lift_joint:
+    <<: *arm_limits
+    has_position_limits: true
+    min_position: -3.04
+    max_position: 0.10
+  elbow_joint: *arm_limits
+  wrist_1_joint: *arm_limits
+  wrist_2_joint: *arm_limits
+  wrist_3_joint: *arm_limits
+  left_finger_joint: &finger_limits
+    has_velocity_limits: true
+    max_velocity: 0.1
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  right_finger_joint: *finger_limits
