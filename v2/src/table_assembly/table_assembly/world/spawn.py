@@ -1,4 +1,4 @@
-"""Drawing this run's room: the wall, the table top leaning on it, and the legs.
+"""Drawing this run's room: the table top lying on its stands, and the legs standing.
 
 This is the simulator's side. It knows exactly where everything is, because it
 is the one putting it there, and the robot never gets to ask it.
@@ -13,11 +13,11 @@ from pathlib import Path
 
 import numpy as np
 
-from ..transforms import WORLD_Z, rotation_z, rpy_from_matrix
+from ..transforms import rotation_z, rpy_from_matrix
 from . import spec
 
 PART_TEMPLATE = Path(__file__).parent / "part.sdf"
-WALL_TEMPLATE = Path(__file__).parent / "wall.sdf"
+STAND_TEMPLATE = Path(__file__).parent / "stand.sdf"
 
 
 @dataclass(frozen=True)
@@ -34,81 +34,54 @@ class SpawnedBox:
 
 @dataclass(frozen=True)
 class Room:
-    wall: SpawnedBox
+    stands: tuple[SpawnedBox, ...]
     top: SpawnedBox
     legs: tuple[SpawnedBox, ...]
-    lean: float  # how far the top leans back from upright, in radians
 
     def boxes(self) -> list[SpawnedBox]:
-        return [self.wall, self.top, *self.legs]
+        return [*self.stands, self.top, *self.legs]
 
 
 def random_room(seed: int) -> Room:
     rng = random.Random(seed)
     colours = rng.sample(spec.PALETTE, 2)
 
-    azimuth = math.radians(rng.uniform(*spec.WALL_AZIMUTH_DEG))
-    outward = np.array([math.cos(azimuth), math.sin(azimuth), 0.0])
-    along = np.array([-outward[1], outward[0], 0.0])
-    distance = rng.uniform(*spec.WALL_DISTANCE)
+    azimuth = math.radians(rng.uniform(*spec.TOP_AZIMUTH_DEG))
+    distance = rng.uniform(*spec.TOP_DISTANCE)
+    size = (rng.uniform(*spec.TOP_LENGTH), rng.uniform(*spec.TOP_WIDTH), rng.uniform(*spec.TOP_THICKNESS))
+    stand_height = rng.uniform(*spec.STAND_HEIGHT)
+    # The long side runs across the line from the arm, turned a little.
+    rotation = rotation_z(azimuth + math.pi / 2.0 + math.radians(rng.uniform(*spec.TOP_TURN_DEG)))
+    centre = np.array([distance * math.cos(azimuth), distance * math.sin(azimuth), 0.0])
 
-    # A top and wall that leave the top's upper edge standing clear of the
-    # wall, so the fingers have room either side of it. Redrawn until they do.
-    while True:
-        size = (rng.uniform(*spec.TOP_LENGTH), rng.uniform(*spec.TOP_WIDTH), rng.uniform(*spec.TOP_THICKNESS))
-        wall_height = rng.uniform(*spec.WALL_HEIGHT)
-        lean = math.radians(rng.uniform(*spec.TOP_LEAN_DEG))
-        if size[1] - wall_height / math.cos(lean) >= spec.TOP_FREE_EDGE:
-            break
-
-    front = outward * distance
-    wall = SpawnedBox(
-        name="wall",
-        size=(spec.WALL_THICKNESS, spec.WALL_LENGTH, wall_height),
-        centre=front + outward * spec.WALL_THICKNESS / 2.0 + WORLD_Z * wall_height / 2.0,
-        rotation=rotation_z(azimuth),
-        colour=spec.WALL_COLOUR,
-        density=0.0,
+    stands = tuple(
+        SpawnedBox(
+            name=f"stand_{index}",
+            size=(spec.STAND_WIDTH, size[1] - 2.0 * spec.STAND_INSET, stand_height),
+            centre=centre
+            + rotation[:, 0] * end * (size[0] / 2.0 - spec.STAND_INSET - spec.STAND_WIDTH / 2.0)
+            + np.array([0.0, 0.0, stand_height / 2.0]),
+            rotation=rotation,
+            colour=spec.STAND_COLOUR,
+            density=0.0,
+        )
+        for index, end in enumerate((-1.0, 1.0))
     )
-    top = _leaning_top(
-        size,
-        lean,
-        wall_height,
-        front + along * rng.uniform(-spec.TOP_SLIDE, spec.TOP_SLIDE),
-        outward,
-        colours[0],
-    )
-    legs = _lying_legs(rng, colours[1])
-    return Room(wall=wall, top=top, legs=legs, lean=lean)
-
-
-def _leaning_top(size, lean, wall_height, foot, outward, colour) -> SpawnedBox:
-    """The top standing on its long edge, leaning back onto the wall's top corner.
-
-    Worked out in the vertical plane through the arm and the wall. The board's
-    back face touches the wall's top front corner, and the bottom corner of
-    that back face rests on the floor, so the back face is the line through
-    those two points at the lean angle.
-    """
-    length, width, thickness = size
-    along = np.array([-outward[1], outward[0], 0.0])
-    up = outward * math.sin(lean) + WORLD_Z * math.cos(lean)  # up the face
-    back = outward * math.cos(lean) - WORLD_Z * math.sin(lean)  # out of the back face, towards the wall
-    heel = foot - outward * wall_height * math.tan(lean)  # bottom corner of the back face
-    centre = heel - back * thickness / 2.0 + up * width / 2.0
-    return SpawnedBox(
+    top = SpawnedBox(
         name="table_top",
         size=size,
-        # A millimetre of air, so the board settles onto the floor rather than
-        # starting inside it.
-        centre=centre + WORLD_Z * 0.001,
-        rotation=np.column_stack((along, up, back)),
-        colour=colour,
+        # A millimetre of air, so the board settles onto the stands rather
+        # than starting inside them.
+        centre=centre + np.array([0.0, 0.0, stand_height + size[2] / 2.0 + 0.001]),
+        rotation=rotation,
+        colour=colours[0],
         density=spec.TOP_DENSITY,
     )
+    legs = _standing_legs(rng, colours[1])
+    return Room(stands=stands, top=top, legs=legs)
 
 
-def _lying_legs(rng: random.Random, colour) -> tuple[SpawnedBox, ...]:
+def _standing_legs(rng: random.Random, colour) -> tuple[SpawnedBox, ...]:
     length = rng.uniform(*spec.LEG_LENGTH)
     thickness = rng.uniform(*spec.LEG_THICKNESS)
     placed: list[SpawnedBox] = []
@@ -118,33 +91,21 @@ def _lying_legs(rng: random.Random, colour) -> tuple[SpawnedBox, ...]:
             distance = rng.uniform(*spec.LEG_DISTANCE)
             leg = SpawnedBox(
                 name=f"leg_{index}",
-                size=(length, thickness, thickness),
+                size=(thickness, thickness, length),
+                # A millimetre of air, so the leg settles onto the floor.
                 centre=np.array(
-                    [distance * math.cos(azimuth), distance * math.sin(azimuth), thickness / 2.0 + 0.001]
+                    [distance * math.cos(azimuth), distance * math.sin(azimuth), length / 2.0 + 0.001]
                 ),
-                rotation=rotation_z(rng.uniform(-math.pi / 2, math.pi / 2)),
+                rotation=rotation_z(rng.uniform(-math.pi / 4, math.pi / 4)),
                 colour=colour,
                 density=spec.LEG_DENSITY,
             )
-            if all(_gap(leg, other) >= spec.LEG_GAP for other in placed):
+            if all(np.linalg.norm(leg.centre[:2] - other.centre[:2]) >= spec.LEG_SPACING for other in placed):
                 placed.append(leg)
                 break
         else:
-            raise RuntimeError(f"could not lay out {spec.LEG_COUNT} legs without them touching")
+            raise RuntimeError(f"could not stand {spec.LEG_COUNT} legs far enough apart")
     return tuple(placed)
-
-
-def _gap(a: SpawnedBox, b: SpawnedBox) -> float:
-    """Clear floor between two lying legs, near enough.
-
-    Each leg is treated as its centre line, sampled finely, and the gap is the
-    closest two samples minus the legs' half thicknesses.
-    """
-    ts = np.linspace(-0.5, 0.5, 25)[:, None]
-    line_a = a.centre[:2] + ts * a.size[0] * a.rotation[:2, 0]
-    line_b = b.centre[:2] + ts * b.size[0] * b.rotation[:2, 0]
-    closest = float(np.min(np.linalg.norm(line_a[:, None, :] - line_b[None, :, :], axis=2)))
-    return closest - (a.size[1] + b.size[1]) / 2.0
 
 
 def box_sdf(box: SpawnedBox) -> str:
@@ -169,7 +130,7 @@ def box_sdf(box: SpawnedBox) -> str:
         blue=blue,
     )
     if box.density == 0.0:
-        template = WALL_TEMPLATE
+        template = STAND_TEMPLATE
     else:
         template = PART_TEMPLATE
         mass = box.density * length * width * height

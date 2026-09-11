@@ -1,9 +1,9 @@
 <!--
-  The wall the table top leans against. Static: it is part of the room, and
-  nothing the arm does should be able to move it.
+  One of the two stands the table top lies on. Static: it is part of the room,
+  and nothing the arm does should be able to move it.
 
   Grey on purpose. The robot tells parts from the room by how colourful they
-  are, and it finds the wall as a grey thing standing up off the floor.
+  are, and it finds a stand as a grey thing standing up off the floor.
 -->
     <model name="{name}">
       <static>true</static>

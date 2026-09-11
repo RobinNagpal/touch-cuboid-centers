@@ -20,14 +20,13 @@ camera. Nothing on this side imports anything from `world/`, and
 
 ## The simulator's side: `table_assembly/world/`
 
-- `spec.py` is the ranges a room is drawn from: how long the wall is and how
-  far away, how big the top can be and how far it leans, how long the legs
-  are and where they may lie.
-- `spawn.py` draws one room. `random_room(seed)` picks the wall, the top and
-  the four legs. `_leaning_top()` works out where a board of that size has to
-  be to stand on the floor and rest on the wall's top corner. `_lying_legs()`
-  scatters the legs, redrawing any that would touch. `box_sdf()` turns a box
-  into the simulator's model format using `part.sdf` or `wall.sdf`.
+- `spec.py` is the ranges a room is drawn from: where the top lies and how
+  big it is, how tall its two stands are, how long the legs are and where
+  they may stand.
+- `spawn.py` draws one room. `random_room(seed)` picks the top, puts a stand
+  under each end of it, and draws the four legs. `_standing_legs()` scatters
+  the legs, redrawing any that would stand too close to another. `box_sdf()` turns a box into the
+  simulator's model format using `part.sdf` or `stand.sdf`.
 - `cell.sdf` is the fixed room: physics, lights, the floor, the window's view,
   and a marker line where the boxes go. `build.py`'s `build_world()` fills the
   marker in.
@@ -47,8 +46,7 @@ camera. Nothing on this side imports anything from `world/`, and
 - `controllers.yaml` says which controllers run the joints.
 - `dimensions.py` is every fixed number the robot has: where its base is,
   its ready posture, how far the fingertips and the camera are from the
-  flange, the patch of floor it builds on, and where the camera goes when it
-  looks round the room.
+  flange, and where the camera goes when it looks round the room.
 - `motion.py` is the `Arm` class, which is everything the arm can be asked to
   do.
   - `move_to()` plans a free move to a pose. It first works out joint angles
@@ -57,6 +55,10 @@ camera. Nothing on this side imports anything from `world/`, and
     each joint's equivalent angle nearest where it is. With a part in hand
     (`any_shape=False`) it will not let the planner pick any other shape.
     After the move it checks the arm really got there (`_check_arrival()`).
+  - `can_reach()` says whether the arm could get to a pose without hitting
+    anything, without moving. It is asked before a part is picked up.
+    `wrist_side()` says which way the wrist would be flipped at a pose; a
+    part in hand is never moved through a wrist flip.
   - `move_to_first()` tries a list of poses and stops at the first that works.
   - `move_linear()` moves in straight lines through one or more poses, and
     says how much of the way it got.
@@ -82,9 +84,9 @@ No ROS in here. Numpy arrays in, numpy arrays out.
   the room.
 - `fitting.py` goes from points to shapes. `cluster()` groups points into one
   lump per object. `floor_height()` finds the floor. `fit_resting_box()` fits
-  a box sitting on the floor — a lying leg, a standing leg, the wall, the
+  a box sitting on the floor — a standing leg, a stand, the
   finished table. `fit_plate()` fits a thin board at any angle — the top,
-  leaning on the wall. `surface_tilt()` says how far a surface is from level.
+  lying on its stands. `surface_tilt()` says how far a surface is from level.
 - `room.py` puts it together. `read_room()` takes the pooled points of
   several pictures and returns a `Room`: the floor height, the table top,
   the legs, the obstacles, and anything coloured that is neither. `leg_length()`,
@@ -94,18 +96,18 @@ No ROS in here. Numpy arrays in, numpy arrays out.
 
 No ROS in here either.
 
-- `plan.py` decides the table. `gripped_axis()` and `table_footprint()` work
-  out which edge of the top the arm will hold, and so which way round the
-  table goes. `choose_site()` picks a patch of floor the table fits on with
-  nothing near it. `plan_table()` returns a `TablePlan`: where the top ends
-  up and where each leg stands, furthest from the arm first.
+- `plan.py` decides the table. `SITE` is where the arm always builds it.
+  `table_footprint()` says which way round the table goes: the top's long
+  edge faces the arm. `plan_table()` returns a `TablePlan`: where the top
+  ends up and where each leg stands, furthest from the arm first.
+  `in_the_way()` lists anything seen on or beside that patch of floor.
 - `grasps.py` says where the tool goes. `hold()` records how a part sits in the
   gripper, and `carried_tool_pose()` uses that to put the part anywhere.
-  `leg_pick_poses()` grips a lying leg round its middle. `turned_upright()`
-  turns a held leg upright about its own middle, ending with the tool
-  pointing whichever way it is asked. `standing_leg_poses()` stands
-  it on a spot. `top_pick_poses()` grips the top by its upper edge.
-  `level_top_poses()` holds it level over the legs. `shifted()` and
+  `leg_pick_poses()` grips a standing leg from above by its top end.
+  `leg_place_pose()` stands it on a spot. `top_pick_poses()`
+  grips the top from the side by the middle of its near edge.
+  `level_top_pose()` holds it level over the legs. `carry_round()` carries a
+  part round the base on an arc without tipping it. `shifted()` and
   `backed_off()` move a pose up or back.
 
 ### Shared pieces: `table_assembly/`
@@ -155,9 +157,12 @@ being enough; it waits for what it needs.
    `robot_description()`, and spawns the robot.
 4. It starts the Gazebo window, if one was asked for, as its own process.
 5. It starts the bridge.
-6. `_chain_spawners()` starts the three controllers one after another.
+6. `_chain_spawners()` starts the three controllers one after another, and
+   starts a spawner again if it fails.
 
-**`main.py`**, in `main()`, builds `Arm`, `WristCamera`, `PlanningSceneClient`
+**`main.py`**, in `main()`, waits for the arm's first joint states, because
+MoveIt gives up if they are not there within ten seconds of it starting. Then
+it builds `Arm`, `WristCamera`, `PlanningSceneClient`
 (given the arm's own planning scene to keep up to date) and
 `AssembleTableTask`, starts a thread that keeps ROS messages flowing, and calls
 `task.run()`. A run that cannot finish ends with one line saying why.
@@ -172,27 +177,31 @@ being enough; it waits for what it needs.
    `scene.set_floor()` and everything else with `_publish()`.
 3. **Measure the top.** `_measure_top()` looks at it from four close views
    and fits it again with `read_room()`.
-4. **Plan.** `_plan()` calls `choose_site()` and `plan_table()`.
+4. **Plan.** `_plan()` calls `plan_table()` at `SITE` and stops if
+   `in_the_way()` finds anything there.
 5. **Legs.** For each spot, `_install_leg()`:
-   - picks the nearest lying leg that is the size of one leg (`_is_one_leg()`);
+   - picks the nearest leg still standing where it started
+     (`_waiting_legs()`), that is the size of one leg (`_is_one_leg()`);
    - `_inspect_leg()` measures it again from close above;
-   - `_stand_up()` opens the fingers (`open_gripper()`), comes down over the
-     leg (`leg_pick_poses()`, `_reach()`), takes it out of MoveIt's scene
+   - `_move_leg()` first pairs each of the four grips with the pose that
+     would stand the leg on its spot (`leg_place_pose()`, `_reachable()`),
+     and drops any grip that cannot reach it. Then it opens the fingers
+     (`open_gripper()`), comes down over the top of the leg
+     (`leg_pick_poses()`, `_reach()`), takes it out of MoveIt's scene
      (`_forget()`), grips it (`_grip()`), tells MoveIt it is held
-     (`scene.attach()`), lifts it, turns it upright where it is
-     (`_turn_upright()`, which tries `turned_upright()` pointing out along
-     the arm's reach, then back towards the base, then as it lay), carries it
-     over its spot (`standing_leg_poses()`), lowers it (`_lower()`), lets go
-     (`_release()`), and lifts straight up off it (`_lift_off()`);
+     (`scene.attach()`), lifts it and carries it round over its spot
+     (`_carry()`), lowers it (`_lower()`), lets go (`_release()`), and lifts
+     straight up off it;
    - `_check_standing()` looks to see the leg standing on its spot.
 
    A failed attempt calls `_let_go()`, looks round the room again, and tries
-   whichever lying leg it finds, up to three times.
+   whichever standing leg it finds, up to three times.
 6. **Top.** `_install_top()` works out where the top goes from where the legs
-   really are, opens the fingers, comes down onto the top's upper edge
-   (`top_pick_poses()`, `_approach()`), grips it, lifts it off the wall, holds
-   it level over the legs (`level_top_poses()`), lowers it, lets go, and
-   pulls back out from under it (`_pull_out()`).
+   really are, keeps only grips that can lay it there (`level_top_pose()`,
+   `_reachable()`), opens the fingers, reaches in level over the top's near
+   edge (`top_pick_poses()`, `_approach()`), grips it, lifts it off the
+   stands, carries it round level (`_carry()`), lowers it onto the legs,
+   lets go, and pulls back out from under it (`_pull_out()`).
 7. **Check.** `_check_table()` looks down on the table, fits a box to what it
    sees with `fit_resting_box()`, and measures the top's tilt with
    `surface_tilt()`.

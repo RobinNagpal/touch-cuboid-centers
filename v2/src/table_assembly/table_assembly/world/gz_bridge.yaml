@@ -1,7 +1,7 @@
 # Gazebo and ROS speak different message formats, so every topic that has to
 # cross between them is listed here. Everything is one way, out of Gazebo.
 #
-# Nothing about the wall or the parts crosses. The robot learns about them only
+# Nothing about the stands or the parts crosses. The robot learns about them only
 # through the camera, the same as it would in a real room.
 
 - ros_topic_name: "/clock"

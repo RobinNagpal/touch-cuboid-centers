@@ -6,14 +6,13 @@ which is the whole point of measuring.
 """
 
 import ast
-import math
 from pathlib import Path
 
 import numpy as np
 import pytest
 from synthetic import spawned_box
 from table_assembly.world import spec
-from table_assembly.world.spawn import _gap, box_sdf, random_room
+from table_assembly.world.spawn import box_sdf, random_room
 
 PACKAGE = Path(__file__).resolve().parents[1] / "table_assembly"
 
@@ -25,31 +24,41 @@ def test_the_same_seed_gives_the_same_room():
 
 
 @pytest.mark.parametrize("seed", range(1, 31))
-def test_the_top_rests_on_the_floor_and_against_the_wall(seed):
+def test_the_top_lies_level_on_both_stands(seed):
     room = random_room(seed)
-    top, wall = spawned_box(room.top), spawned_box(room.wall)
-    corners = top.corners()
-    # The lowest corner is on the floor, give or take the millimetre of air.
-    assert corners[:, 2].min() == pytest.approx(0.001, abs=1e-6)
-    # The back face passes through the wall's top front corner.
-    back_normal = top.axis(2)
-    wall_corner_height = wall.top_z
-    back_face_point = top.centre + back_normal * top.size[2] / 2
-    outward = wall.axis(0)
-    front_of_wall = wall.centre - outward * wall.size[0] / 2
-    corner = front_of_wall.copy()
-    corner[2] = wall_corner_height
-    corner += np.array([0.0, 0.0, 0.001])
-    assert float((corner - back_face_point) @ back_normal) == pytest.approx(0.0, abs=1e-6)
-    assert spec.TOP_LEAN_DEG[0] <= math.degrees(room.lean) <= spec.TOP_LEAN_DEG[1]
+    top = spawned_box(room.top)
+    assert top.axis(2) == pytest.approx([0.0, 0.0, 1.0])
+    assert len(room.stands) == 2
+    for spawned in room.stands:
+        stand = spawned_box(spawned)
+        assert stand.bottom_z == pytest.approx(0.0, abs=1e-9)
+        # The top sits on it, give or take the millimetre of air.
+        assert top.bottom_z == pytest.approx(stand.top_z + 0.001, abs=1e-9)
+        # And the stand is under the top all round, so it cannot tip.
+        assert top.footprint_distance(stand.corners()[:, :2]).max() == pytest.approx(0.0, abs=1e-9)
 
 
 @pytest.mark.parametrize("seed", range(1, 31))
-def test_the_legs_never_touch(seed):
+def test_the_middle_of_the_top_is_open_underneath(seed):
+    # The arm grips the top by the middle of its near edge with one finger
+    # under the board, so the stands have to leave room there for a finger.
+    room = random_room(seed)
+    top = spawned_box(room.top)
+    for spawned in room.stands:
+        along = abs(float((spawned_box(spawned).centre - top.centre) @ top.axis(0)))
+        assert along - spec.STAND_WIDTH / 2.0 > 0.05
+
+
+@pytest.mark.parametrize("seed", range(1, 31))
+def test_the_legs_stand_upright_and_well_apart(seed):
     legs = random_room(seed).legs
+    for leg in legs:
+        box = spawned_box(leg)
+        assert box.bottom_z == pytest.approx(0.001, abs=1e-9)
+        assert box.size[2] > box.size[0]
     for i, a in enumerate(legs):
         for b in legs[i + 1 :]:
-            assert _gap(a, b) >= spec.LEG_GAP
+            assert np.linalg.norm(a.centre[:2] - b.centre[:2]) >= spec.LEG_SPACING
 
 
 def test_every_box_becomes_a_model():

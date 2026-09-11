@@ -29,15 +29,17 @@ v2/
 The most important boundary in the project is between `world/` and
 everything else.
 
-`world/` is the simulator's side. It decides how big the table top is, how far
-it leans, where the wall is and where each leg lies, and it writes that into
-the world file Gazebo loads. It knows the truth because it makes it up.
+`world/` is the simulator's side. It decides how big the table top is, where
+it lies, how tall its stands are and where each leg lies, and it writes that
+into the world file Gazebo loads. It knows the truth because it makes it up.
 
 Everything else is the robot's side, and the robot is told nothing about the
 room. It knows where it is bolted down and how its own gripper and camera are
-built — that is `arm/dimensions.py`, and that is all. The floor height, the
-wall, the top's length, width, thickness and lean, and every leg's size and
-position it has to measure with the camera.
+built — that is `arm/dimensions.py` — and it always builds the table on the
+same patch of floor in front of it (`SITE` in `assembly/plan.py`), which is
+its own choice of where to work. The floor height, the stands, the top's
+position, length, width and thickness, and every leg's size and position it
+has to measure with the camera.
 
 That boundary is enforced, not just intended. `test_world.py` parses every
 module outside `world/` and fails if any of them imports from it. The only
@@ -77,8 +79,8 @@ place and the simulator and the planner cannot disagree about it.
 | `arm/arm.urdf.xacro` | The whole robot. Pulls the UR5e in from `ur_description`, stands it on the floor, adds the gripper and camera, and declares which joints `ros2_control` may drive. |
 | `arm/gripper.urdf.xacro` | The two-finger gripper, the four gripping pads on each finger, their friction, and a contact sensor on each fingertip pad. |
 | `arm/controllers.yaml` | The three `ros2_control` controllers: joint states, the arm, the gripper. |
-| `arm/dimensions.py` | Everything the robot knows in advance: where its base is, its ready posture, its tooling offsets, its comfortable reach, where it looks from when surveying. |
-| `arm/motion.py` | The `Arm` class: working out joint angles in a consistent shape, planning, straight lines, checking it arrived, gripping and checking the fingers opened, feeling. |
+| `arm/dimensions.py` | Everything the robot knows in advance: where its base is, its ready posture, its tooling offsets, where it looks from when surveying. |
+| `arm/motion.py` | The `Arm` class: working out joint angles in a consistent shape and free of collisions, whether a pose can be reached, planning, straight lines, checking it arrived, gripping and checking the fingers opened, feeling. |
 | `arm/camera/wrist_camera.urdf.xacro` | The RGB-D sensor, and the two frames a ROS camera needs. |
 | `arm/camera/wrist_camera.py` | The `WristCamera` class: a frame taken after it was asked for, plus the pose the camera was at when that frame was taken. Saves every frame when `TABLE_ASSEMBLY_VIEWS` is set. |
 
@@ -94,8 +96,8 @@ place and the simulator and the planner cannot disagree about it.
 
 | File | What it owns |
 | --- | --- |
-| `assembly/plan.py` | Where to build the table, where each leg stands, and where the top ends up. |
-| `assembly/grasps.py` | Tool poses to pick each part up, turn a leg upright, and put each part down, all through the *hold*. |
+| `assembly/plan.py` | Where the table is built, where each leg stands, where the top ends up, and whether anything is in the way. |
+| `assembly/grasps.py` | Tool poses to pick each part up, carry it round the base, and put it down, all through the *hold*. |
 
 ### The world
 
@@ -103,8 +105,8 @@ place and the simulator and the planner cannot disagree about it.
 | --- | --- |
 | `world/cell.sdf` | Physics, lighting, the floor, and the window's opening view. One marker line says where the parts go. |
 | `world/spec.py` | The ranges each run's room is drawn from. |
-| `world/spawn.py` | Drawing this run's wall, top and legs, and writing them as models. |
-| `world/part.sdf`, `world/wall.sdf` | One box model each, with blanks in it. |
+| `world/spawn.py` | Drawing this run's top, its two stands and the legs, and writing them as models. |
+| `world/part.sdf`, `world/stand.sdf` | One box model each, with blanks in it. |
 | `world/build.py` | Putting the room and the parts into one world file. |
 | `world/gz_bridge.yaml` | Every topic that crosses from Gazebo into ROS. None of them says anything about the parts. |
 | `world/fastdds.xml` | Middleware buffer sizes, without which depth images do not arrive. |
@@ -123,7 +125,7 @@ Each module has one job, and the dependencies only point one way.
 | `perception/fitting.py` | `geometry.py`, `transforms.py` |
 | `perception/room.py` | `perception/fitting.py`, `geometry.py` |
 | `assembly/plan.py` | `geometry.py` |
-| `assembly/grasps.py` | `assembly/plan.py`, `arm/dimensions.py`, `geometry.py`, `transforms.py` |
+| `assembly/grasps.py` | `arm/dimensions.py`, `geometry.py`, `transforms.py` |
 | `messages.py` | `transforms.py` |
 | `arm/camera/wrist_camera.py` | `perception/pixels.py`, `messages.py`, `arm/dimensions.py` |
 | `arm/motion.py` | `messages.py`, `arm/dimensions.py` |
@@ -134,7 +136,7 @@ Each module has one job, and the dependencies only point one way.
 
 Only one module knows what order things happen in. `task.py` holds the
 workflow; everything below it offers a capability and has no opinion about
-when it is used. `grasps.py` knows how to stand a leg up, not that the legs go
+when it is used. `grasps.py` knows how to set a leg down on a spot, not that the legs go
 in before the top. So a change to the workflow is a change to one file.
 
 ### The launch files
@@ -147,20 +149,28 @@ in before the top. So a change to the workflow is a change to one file.
 3. starts the Gazebo server, `robot_state_publisher`, and spawns the robot;
 4. starts the Gazebo window, if one was asked for, as a separate process;
 5. starts the ROS <-> Gazebo bridge;
-6. starts the three controllers, one after another, each willing to wait.
+6. starts the three controllers, one after another, each willing to wait,
+   and starts a spawner again if it fails.
 
 The window is a second process because macOS will not have a window share a
 process with the simulator. The controllers go one at a time because three
 spawners racing into a controller manager that is still waking up is enough
 for one of them to trip over another. They are told to wait up to five
-minutes, because on a cold start the controller manager took well over a
-minute to appear, and a spawner that gives up leaves the arm without joint
-states.
+minutes, because on a cold start — the first run after an install — the
+controller manager took over four minutes to appear. Even so, a spawner
+started that early once found the controller manager and never heard back
+from it, while a fresh one started afterwards was answered at once. So a
+failed spawner is started again, up to three times, and the next controller
+waits until the one before it has really loaded: skipping one leaves the arm
+without joint states.
 
 `launch/run.launch.py` adds MoveIt's `move_group` and the task node, and is
 what `make run` calls. It gives the cell a ten second head start, but the task
-does not depend on that being long enough — it waits for the controllers, the
-planning scene service and the first camera frames itself.
+does not depend on that being long enough — it waits for the joint states,
+the controllers, the planning scene service and the first camera frames
+itself. The joint states are waited for before MoveIt is started inside the
+task, because MoveIt waits only ten seconds for them and then gives up for
+good.
 
 ## Nodes and topics
 
@@ -180,7 +190,7 @@ planning scene service and the first camera frames itself.
 ```
 
 Everything the robot learns about the room comes in on the three camera
-topics. Nothing else crossing the bridge mentions the wall or the parts.
+topics. Nothing else crossing the bridge mentions the stands or the parts.
 
 The task node holds MoveIt's planner inside itself, so free moves are planned
 in process. Straight-line moves go through `move_group`, because MoveIt only

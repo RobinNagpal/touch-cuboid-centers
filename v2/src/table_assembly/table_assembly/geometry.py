@@ -1,9 +1,9 @@
 """A box in the room: the one shape everything here is described with.
 
-Legs, the table top, the wall and the table that gets built are all boxes. A
+Legs, the table top, the stands and the table that gets built are all boxes. A
 box is a centre, a rotation and three side lengths, and the rotation is a full
-3x3 matrix rather than a single yaw, because the table top starts off leaning
-against a wall and a yaw cannot describe that.
+3x3 matrix rather than a single yaw, because a board is fitted at whatever
+angle the camera finds it, and a yaw cannot describe that.
 
 Plain numpy, no ROS, so it can be tested on its own.
 """

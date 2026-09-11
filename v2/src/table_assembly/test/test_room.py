@@ -26,11 +26,10 @@ def survey(room):
         box = spawned_box(spawned)
         camera = min(CAMERAS, key=lambda c: np.linalg.norm(c - box.centre))
         parts.append(visible_surface(box, camera))
-    wall = spawned_box(room.wall)
-    others = [
-        floor_points(),
-        visible_surface(wall, min(CAMERAS, key=lambda c: np.linalg.norm(c - wall.centre))),
-    ]
+    others = [floor_points()]
+    for spawned in room.stands:
+        stand = spawned_box(spawned)
+        others.append(visible_surface(stand, min(CAMERAS, key=lambda c: np.linalg.norm(c - stand.centre))))
     return np.concatenate(parts), np.concatenate(others)
 
 
@@ -47,12 +46,14 @@ def test_the_room_is_read_back_as_the_simulator_laid_it_out(seed):
 
     assert len(seen.legs) == 4
     for leg in seen.legs:
-        assert not is_standing(leg)
-        assert leg_length(leg) == pytest.approx(room.legs[0].size[0], abs=0.002)
+        assert is_standing(leg)
+        assert leg_length(leg) == pytest.approx(room.legs[0].size[2], abs=0.002)
 
-    # The wall is found as an obstacle: something grey standing up off the floor.
-    assert len(seen.obstacles) == 1
-    assert seen.obstacles[0].size[2] == pytest.approx(room.wall.size[2], abs=0.002)
+    # Each stand is found as an obstacle: something grey standing up off the
+    # floor. How tall is not asked: the top hides the upper part of it.
+    assert len(seen.obstacles) == 2
+    for spawned in room.stands:
+        assert min(np.linalg.norm(box.centre[:2] - spawned.centre[:2]) for box in seen.obstacles) < 0.02
     assert not seen.unknown
 
 
@@ -68,4 +69,4 @@ def test_nothing_the_robot_sees_of_itself_counts():
         ]
     )
     seen = read_room(parts, np.concatenate([others, own_base]), self_centre=BASE, self_radius=0.13)
-    assert len(seen.obstacles) == 1
+    assert len(seen.obstacles) == 2

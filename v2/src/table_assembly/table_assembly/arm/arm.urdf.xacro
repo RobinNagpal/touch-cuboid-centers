@@ -72,8 +72,10 @@
     <xacro:position_joint name="wrist_2_joint" initial="-1.5708"/>
     <xacro:position_joint name="wrist_3_joint" initial="0.0"/>
 
-    <xacro:position_joint name="left_finger_joint" initial="0.04"/>
-    <xacro:position_joint name="right_finger_joint" initial="0.04"/>
+    <!-- Open, but short of the end stops, where a finger can stick. The
+         same as GRIPPER_MAX_OPENING in arm/dimensions.py. -->
+    <xacro:position_joint name="left_finger_joint" initial="0.037"/>
+    <xacro:position_joint name="right_finger_joint" initial="0.037"/>
   </ros2_control>
 
   <gazebo>

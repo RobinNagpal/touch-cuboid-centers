@@ -14,18 +14,16 @@
       0.050  the fingers start
       0.170  the fingertips
 
-    The fingers are long on purpose. A leg is stood up with the gripper held
-    level beside it, and the table top is carried by one edge with the rest of
-    it sticking out past the fingertips, so the body of the gripper has to stay
-    well back from whatever the fingers are holding.
+    The fingers are long on purpose. The table top is carried by one edge with
+    the rest of it sticking out past the fingertips, and a leg is carried by
+    its top end, so the body of the gripper has to stay well back from
+    whatever the fingers are holding.
   -->
 
   <xacro:macro name="parallel_gripper" params="prefix parent">
 
     <!-- The body is wide across the way the fingers open, to house their
-         travel, and slim the other way. The slim side is the one that faces
-         the floor when a leg is stood up with the gripper held level beside
-         it, halfway up the leg, so every centimetre of it is floor clearance. -->
+         travel, and slim the other way. -->
     <xacro:property name="body_depth" value="0.05"/>
     <xacro:property name="body_width" value="0.11"/>
     <xacro:property name="body_length" value="0.05"/>

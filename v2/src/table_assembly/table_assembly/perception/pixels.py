@@ -2,7 +2,7 @@
 
 Two kinds of pixel matter. Coloured ones are the parts: the legs and the table
 top are painted in saturated colours and nothing else in the room is. Grey
-ones are everything else — the floor, the wall, anything in the way — and are
+ones are everything else — the floor, the stands, anything in the way — and are
 kept too, because the floor has to be found and obstacles have to be avoided.
 
 Only numpy and OpenCV, so this can be tested with no simulator running.

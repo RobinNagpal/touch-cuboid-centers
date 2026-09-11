@@ -1,9 +1,9 @@
 """What the arm knows about itself.
 
 This is the only fixed knowledge the robot has. It knows where it is bolted
-down, how its tooling is built, and how far it can comfortably reach. It does
-not know where the floor is, where the wall is, or anything about the parts:
-those are measured with the camera on every run.
+down and how its tooling is built. It does not know where the floor is, where
+the stands are, or anything about the parts: those are measured with the
+camera on every run.
 
 Anything changed here has a matching number in arm.urdf.xacro or
 gripper.urdf.xacro, and the two have to move together.
@@ -32,7 +32,11 @@ SELF_HEIGHT = 0.25
 # across fits between them with room to spare, because a part almost as wide
 # as the gripper opens has to be approached with its yaw right to within a
 # degree or two, or a corner catches a finger.
-GRIPPER_MAX_OPENING = 0.080
+#
+# The fingers travel 4 cm each, an 8 cm gap, but are never opened past 7.4:
+# a finger sent right to its end stop has been seen to stay stuck there for
+# good when told to close again, after the arm has been moving.
+GRIPPER_MAX_OPENING = 0.074
 MAX_GRASP_WIDTH = 0.065
 
 # Where the camera sits relative to tool0, in the tool's own frame. It is off to
@@ -44,14 +48,6 @@ CAMERA_OFFSET = np.array([0.085, 0.0, 0.015])
 # direction the gripper reaches in. See arm/gripper.urdf.xacro.
 FINGERTIP_OFFSET = 0.170
 GRASP_OFFSET = 0.110
-
-# The floor area the arm can comfortably build a table on, as distances of the
-# table's centre from the base. Nearer than this and the arm has to fold up to
-# reach the edge of the top; further and the far legs are at the limit of its
-# reach.
-BUILD_RADIUS_MIN = 0.52
-BUILD_RADIUS_MAX = 0.62
-BUILD_RADIUS_PREFERRED = 0.58
 
 # The survey: where the camera goes to look around the room before the arm
 # knows what is in it. The camera is carried round the base on a circle and

@@ -81,7 +81,7 @@ def read_room(
 
     The floor is found from the points unless ``floor_z`` is given. It is found
     once, from the wide survey where it fills most of every picture, and then
-    handed back in for close-up views, where a part or the wall may fill more
+    handed back in for close-up views, where a part may fill more
     of the picture than the floor does.
     """
     part_points = _outside(part_points, self_centre, self_radius)
@@ -139,7 +139,7 @@ def _away_from(points: np.ndarray, others: np.ndarray, distance: float) -> np.nd
     Done on a voxel grid rather than point by point: every voxel an ``other``
     falls in, and its neighbours, is marked, and points in marked voxels are
     dropped. That makes it approximate to within a voxel, which is plenty for
-    telling a dim side of a part from a wall.
+    telling a dim side of a part from a stand.
     """
     if len(points) == 0 or len(others) == 0:
         return points

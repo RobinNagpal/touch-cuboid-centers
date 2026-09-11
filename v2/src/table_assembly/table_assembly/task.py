@@ -1,14 +1,15 @@
 """The workflow.
 
-1. Look round the room and work out what is in it: the floor, the wall, the
-   table top leaning against it, and the legs lying on the floor.
+1. Look round the room and work out what is in it: the floor, the table top
+   lying on its stands, the stands, and the legs standing on the floor.
 2. Measure the table top properly, close up: length, width and thickness.
-3. Decide where to build the table, and from the top's size, where each of
-   the four legs has to stand.
-4. For each leg: pick it up, stand it upright on its spot, and look to check
-   it is really standing there.
-5. Pick the top up by its upper edge, turn it level, and lower it onto the
-   legs where they actually ended up.
+3. From the top's size, work out where each of the four legs has to stand
+   for a table built at the arm's usual spot.
+4. For each leg: pick it up by its top end, carry it round hanging from the
+   fingers, stand it on its spot, and look to check it is really standing
+   there.
+5. Pick the top up by its near edge, carry it round level, and lower it onto
+   the legs where they actually ended up.
 6. Look at the finished table and check it: its height, whether it is level,
    and whether it is where it was meant to be.
 
@@ -26,9 +27,6 @@ import numpy as np
 from .arm.camera import WristCamera
 from .arm.dimensions import (
     BASE_POSITION,
-    BUILD_RADIUS_MAX,
-    BUILD_RADIUS_MIN,
-    BUILD_RADIUS_PREFERRED,
     CAMERA_OFFSET,
     GRIPPER_MAX_OPENING,
     MAX_GRASP_WIDTH,
@@ -40,18 +38,17 @@ from .arm.dimensions import (
 )
 from .arm.motion import Arm, MotionFailed
 from .assembly.grasps import (
+    LEG_GRIP_DEPTH,
     backed_off,
-    carry_upright,
+    carry_round,
     hold,
     leg_pick_poses,
-    level_top_poses,
+    leg_place_pose,
+    level_top_pose,
     shifted,
-    standing_leg_poses,
     top_pick_poses,
-    turned_upright,
-    upright_tool_pose,
 )
-from .assembly.plan import TablePlan, choose_site, gripped_axis, plan_table, table_footprint
+from .assembly.plan import SITE, TablePlan, in_the_way, plan_table, table_footprint
 from .geometry import Box, describe
 from .perception.fitting import cluster, fit_resting_box, surface_tilt
 from .perception.pixels import back_project, colour_masks
@@ -71,19 +68,14 @@ LEGS_NEEDED = 4
 # the simulator resolves that by firing the part out sideways.
 GRIP_SQUEEZE = 0.004
 
-# How high a part is lifted clear of the floor before it is carried anywhere,
-# and how high above its final place it is brought before being lowered on.
+# How high a part is lifted clear of where it lies before it is carried
+# anywhere, and how high above its final place it is brought before being
+# lowered on.
 LIFT = 0.08
 LOWER_FROM = 0.06
 
-# How far a carried leg's lower end passes above the tops of the legs already
-# standing.
+# How far a carried part passes above the tops of the legs standing.
 CARRY_CLEARANCE = 0.04
-
-# How far a leg's lower end stays above the floor as it is turned upright.
-# Higher than any leg still lying on the floor nearby, which the turning leg's
-# lower end would otherwise sweep into.
-TURN_CLEARANCE = 0.08
 
 # Joint speed, as a fraction of the arm's limits, for moves with a part in
 # the gripper. The part is held by friction alone, and a fast swing with it is
@@ -95,15 +87,19 @@ CARRY_SPEED = 0.1
 # low, push the part into it; letting it drop a few millimetres is harmless.
 DROP = 0.003
 
-# How far back along the slope of the top the gripper lines up before moving
-# onto its edge.
+# How far back from the top's edge the gripper lines up before reaching in
+# over it. Further than the fingers reach in, so they start clear of the board.
 TOP_APPROACH = 0.08
 
 # How far the gripper pulls back out of the top once it has let go, along the
 # way it reached in. Further than the fingers reach under the board, but no
-# further: the gripper is pulling back towards the arm's own base, and the arm
-# is already folded up tight to reach the near edge of the table.
-TOP_RETREAT = 0.07
+# further: it is pulling back towards the arm's own base, and the arm is
+# already folded up to reach the top's near edge.
+TOP_RETREAT = 0.06
+
+# The top is gripped as if it were lying level. One tipped further than this
+# is not where the arm thinks it is, and is left alone.
+TOP_MAX_TILT = math.radians(5.0)
 
 # A standing leg must be found within this distance of where it was put.
 LEG_PLACED_TOLERANCE = 0.03
@@ -118,8 +114,8 @@ LEG_SIZE_TOLERANCE = 0.012
 HEIGHT_TOLERANCE = 0.010
 TILT_TOLERANCE = math.radians(3.0)
 
-# Attempts at each leg before giving up on it. A leg that falls over is found
-# again by looking round the room, and tried again.
+# Attempts at each leg before giving up on it. After a failed attempt the room
+# is looked round again, and whichever standing leg is found is tried next.
 LEG_ATTEMPTS = 3
 
 
@@ -159,6 +155,7 @@ class AssembleTableTask:
         self._scene = scene
         self._floor_z: float | None = None
         self._leg_size: tuple[float, float] | None = None  # length and thickness, once measured
+        self._spots: tuple[np.ndarray, ...] = ()  # where the legs go, once planned
         # What the arm currently believes is in the room, by name, which is
         # also exactly what MoveIt is told about.
         self._known: dict[str, Box] = {}
@@ -191,13 +188,14 @@ class AssembleTableTask:
             raise TaskFailed("a part is too thick for the gripper to close round")
 
         plan = self._plan(top, length, thickness, room)
+        self._spots = plan.leg_spots
 
         standing: list[Box] = []
         for number, spot in enumerate(plan.leg_spots, start=1):
             self._log.info(f"--- leg {number} of {LEGS_NEEDED} ---")
-            leg = self._install_leg(spot, plan, number)
+            leg = self._install_leg(spot, number)
             if leg is None:
-                raise TaskFailed(f"could not stand leg {number} up; the top cannot go on three legs")
+                raise TaskFailed(f"could not put leg {number} on its spot; the top cannot go on three legs")
             standing.append(leg)
 
         self._log.info("--- table top ---")
@@ -226,7 +224,7 @@ class AssembleTableTask:
         if room.top is not None:
             self._known["top"] = room.top
         for i, leg in enumerate(room.legs):
-            self._known[f"leg_{'standing' if is_standing(leg) else 'lying'}_{i}"] = leg
+            self._known[f"leg_{i}"] = leg
         self._publish()
         return room
 
@@ -281,30 +279,35 @@ class AssembleTableTask:
         return False
 
     def _measure_top(self, seen: Box) -> Box:
-        """Measure the top close up, from in front of it and from above its edge.
+        """Measure the top close up, from above and from the arm's side.
 
-        The survey saw it from far off and at a slant. Up close, the front
-        face gives length and width to a millimetre or so, and a look down on
-        its upper edge shows how thick it is.
+        The survey saw it from far off. Up close, the upper face gives length
+        and width to a millimetre or so, and the near side face, seen at a
+        slant, gives its thickness.
         """
-        normal, up = seen.axis(2), _up_the_face(seen)
-        along = np.cross(up, normal)
+        toward = BASE_POSITION - seen.centre
+        toward[2] = 0.0
+        toward /= np.linalg.norm(toward)
+        along = np.cross(WORLD_Z, toward)
         directions = (
-            normal + 0.9 * WORLD_Z,
-            normal + 0.9 * WORLD_Z + 0.5 * along,
-            normal + 0.9 * WORLD_Z - 0.5 * along,
-            0.4 * normal + WORLD_Z,
+            WORLD_Z + 0.8 * toward,
+            WORLD_Z + 0.8 * toward + 0.5 * along,
+            WORLD_Z + 0.8 * toward - 0.5 * along,
+            WORLD_Z + 0.2 * toward,
         )
         views = [(seen.centre + 0.40 * d / np.linalg.norm(d), seen.centre) for d in directions]
         room = self._look(views)
         if room.top is None or np.linalg.norm(room.top.centre - seen.centre) > 0.08:
             self._log.warning("lost the top close up; keeping the survey's measurement")
-            return seen
-        top = room.top
-        lean = math.degrees(math.acos(min(1.0, abs(float(_up_the_face(top)[2])))))
+            top = seen
+        else:
+            top = room.top
+        tilt = math.acos(min(1.0, abs(float(top.axis(2)[2]))))
         length, width, thickness = (float(v) * 100 for v in top.size)
         self._log.info(f"table top: {length:.1f} x {width:.1f} cm, {thickness:.1f} cm thick")
-        self._log.info(f"  standing on its edge, leaning {lean:.1f} degrees back from upright")
+        self._log.info(f"  lying {math.degrees(tilt):.1f} degrees off level")
+        if tilt > TOP_MAX_TILT:
+            raise TaskFailed("the top is not lying flat, and it can only be picked up lying flat")
         self._known["top"] = top
         self._publish()
         return top
@@ -321,17 +324,15 @@ class AssembleTableTask:
     # -------------------------------------------------------------- planning
 
     def _plan(self, top: Box, length: float, thickness: float, room: Room) -> TablePlan:
+        plan = plan_table(top, length, thickness, self._floor_z, SITE, BASE_POSITION)
+        blocking = in_the_way(plan, room.everything())
+        if blocking:
+            where = np.round(blocking[0].centre[:2], 3).tolist()
+            raise TaskFailed(f"the floor where the table goes is not clear: something is at {where}")
         footprint = table_footprint(top)
-        radii = tuple(np.linspace(BUILD_RADIUS_MIN, BUILD_RADIUS_MAX, 3))
-        centre = choose_site(
-            footprint, room.everything(), BASE_POSITION, radii=radii, preferred_radius=BUILD_RADIUS_PREFERRED
-        )
-        if centre is None:
-            raise TaskFailed("no clear patch of floor in reach is big enough to build the table on")
-        plan = plan_table(top, length, thickness, self._floor_z, centre, BASE_POSITION)
         self._log.info(
             f"building a {footprint[0] * 100:.1f} x {footprint[1] * 100:.1f} cm table, "
-            f"{(length + top.size[2]) * 100:.1f} cm high, centred at {np.round(centre, 3).tolist()}"
+            f"{(length + top.size[2]) * 100:.1f} cm high, centred at {np.round(SITE, 3).tolist()}"
         )
         for spot in plan.leg_spots:
             self._log.info(f"  a leg goes at {np.round(spot[:2], 3).tolist()}")
@@ -339,53 +340,66 @@ class AssembleTableTask:
 
     # --------------------------------------------------------------- legs
 
-    def _install_leg(self, spot: np.ndarray, plan: TablePlan, number: int) -> Box | None:
-        """Stand one lying leg upright on ``spot``, and return it as measured there.
+    def _install_leg(self, spot: np.ndarray, number: int) -> Box | None:
+        """Move one standing leg onto ``spot``, and return it as measured there.
 
         A failed attempt leaves the leg wherever it ended up, so the room is
-        looked round again and whichever lying leg is found is tried next.
+        looked round again and whichever waiting leg is found is tried next.
         """
         for attempt in range(1, LEG_ATTEMPTS + 1):
             try:
                 if attempt > 1:
                     self._survey()
-                lying = {
-                    name: box
-                    for name, box in self._known.items()
-                    if name.startswith("leg_lying") and self._is_one_leg(box)
-                }
-                if not lying:
-                    self._log.error("no lying legs left to use")
+                waiting = self._waiting_legs()
+                if not waiting:
+                    self._log.error("no standing legs left to use")
                     return None
                 name = min(
-                    lying, key=lambda n: float(np.linalg.norm(lying[n].centre[:2] - BASE_POSITION[:2]))
+                    waiting, key=lambda n: float(np.linalg.norm(waiting[n].centre[:2] - BASE_POSITION[:2]))
                 )
-                leg = self._inspect_leg(lying[name])
-                self._stand_up(name, leg, spot)
-                standing = self._check_standing(spot)
-                if standing is None:
+                leg = self._inspect_leg(waiting[name])
+                self._move_leg(name, leg, spot)
+                placed = self._check_standing(spot)
+                if placed is None:
                     raise MotionFailed("the leg is not standing where it was put")
-                self._known[f"leg_standing_{number}"] = standing
+                self._known[f"leg_placed_{number}"] = placed
                 self._publish()
                 self._log.info(
-                    f"leg standing, {standing.size[2] * 100:.1f} cm tall, "
-                    f"{np.linalg.norm(standing.centre[:2] - spot[:2]) * 1000:.0f} mm from its spot"
+                    f"leg standing, {placed.size[2] * 100:.1f} cm tall, "
+                    f"{np.linalg.norm(placed.centre[:2] - spot[:2]) * 1000:.0f} mm from its spot"
                 )
-                return standing
+                return placed
             except MotionFailed as failure:
                 self._log.error(f"attempt {attempt} at leg {number} failed: {failure}")
                 self._let_go()
         return None
 
+    def _waiting_legs(self) -> dict[str, Box]:
+        """The legs still standing where they started, by name.
+
+        A leg that has fallen over is not one of them: the arm only picks legs
+        up standing. Nor is anything the size of two legs, or a leg already on
+        one of the table's spots.
+        """
+        return {
+            name: box
+            for name, box in self._known.items()
+            if name.startswith("leg_")
+            and not name.startswith("leg_placed")
+            and is_standing(box)
+            and self._is_one_leg(box)
+            and all(np.linalg.norm(box.centre[:2] - spot[:2]) > LEG_PLACED_TOLERANCE for spot in self._spots)
+        }
+
     def _inspect_leg(self, seen: Box) -> Box:
-        """Measure a lying leg again from close above, just before picking it up."""
-        room = self._look_around(seen.centre)
+        """Measure a standing leg again from close above, just before picking it up."""
+        room = self._look_around(seen.centre + WORLD_Z * 0.05)
         near = [leg for leg in room.legs if np.linalg.norm(leg.centre[:2] - seen.centre[:2]) < 0.06]
         if not near:
             raise MotionFailed("could not find the leg again close up")
         leg = min(near, key=lambda box: float(np.linalg.norm(box.centre[:2] - seen.centre[:2])))
-        if is_standing(leg):
-            raise MotionFailed("that leg is already standing")
+        if not is_standing(leg):
+            raise MotionFailed("that leg has fallen over, and a leg is only picked up standing")
         if not self._is_one_leg(leg):
             raise MotionFailed(f"close up it measures {describe(leg.size)}, which is not one leg")
         self._log.info(f"picking up a {describe(leg.size)} leg")
@@ -399,32 +413,34 @@ class AssembleTableTask:
             and abs(leg_thickness(box) - thickness) < LEG_SIZE_TOLERANCE
         )
 
-    def _stand_up(self, name: str, leg: Box, spot: np.ndarray) -> None:
-        """Pick a lying leg up round its middle and stand it upright on ``spot``.
+    def _move_leg(self, name: str, leg: Box, spot: np.ndarray) -> None:
+        """Pick a standing leg up by its top end and stand it on ``spot``.
 
-        Four stages, each short and slow: lift it clear, turn it upright where
-        it is, carry it upright to above its spot, and lower it on.
+        The gripper points straight down the whole time and the leg hangs
+        straight down from it: up, round the base above the other legs, and
+        down onto the spot.
         """
-        width = float(leg.size[1])
-        open_width = min(width + 0.020, GRIPPER_MAX_OPENING)
+        width = float(leg_thickness(leg))
+        # 2 cm of room either side, so a leg measured a little off is still
+        # between the fingers when they come down round it.
+        open_width = min(width + 0.040, GRIPPER_MAX_OPENING)
         length = leg_length(leg)
-        lift = WORLD_Z * (self._floor_z + length / 2.0 + TURN_CLEARANCE - leg.centre[2])
 
-        # The leg stays in MoveIt's scene until the open fingers are either side
-        # of it. If the straight line down fails and the planner has to find
-        # its own way, a planner that did not know the leg was there would be
-        # free to swing the fingers straight through it.
-        # Of the two ways to pick the leg up, the one that ends up, once the
-        # leg is turned upright, with the gripper already reaching towards the
-        # spot is tried first, so the carry has least turning to do.
-        outward = _outward(spot)
-        options = leg_pick_poses(leg, self._floor_z)
-        options.sort(
-            key=lambda pose: -float(turned_upright(hold(leg, pose), shifted(pose, lift))[-1][:3, 2] @ outward)
-        )
+        # Each grip is paired with the pose that would stand the leg on its
+        # spot, and a grip with no such pose is not used. Finding that out with
+        # the leg already in the air would mean dropping it wherever the arm
+        # happened to be.
+        choices = []
+        for pick in leg_pick_poses(leg):
+            wrist = self._arm.wrist_side(shifted(pick, WORLD_Z * LIFT))
+            place = leg_place_pose(hold(leg, pick), pick, spot, length, DROP, BASE_POSITION)
+            if wrist is not None and self._reachable([place], wrist) is not None:
+                choices.append((pick, place))
+        if not choices:
+            raise MotionFailed("there is no way to stand this leg on its spot, however it is gripped")
 
         self._arm.open_gripper(open_width)
-        pick = options[self._arm.move_to_first([shifted(pose, WORLD_Z * LIFT) for pose in options])]
+        pick, place = choices[self._arm.move_to_first([shifted(p, WORLD_Z * LIFT) for p, _ in choices])]
         self._reach(pick)
         self._forget(name)
         self._grip(width)
@@ -432,71 +448,18 @@ class AssembleTableTask:
         held = hold(leg, pick)
         self._scene.attach("carried", leg, pick)
         try:
-            self._arm.move_linear(shifted(pick, lift), speed=CARRY_SPEED)
-            reach = self._turn_upright(held, shifted(pick, lift))
-            place = self._carry_leg(
-                held, (shifted(pick, lift) @ np.linalg.inv(held))[:3, 3], reach, spot, length
-            )
+            # High enough that the leg's lower end passes over every leg standing.
+            tops = [box.top_z for n, box in self._known.items() if n.startswith("leg_")]
+            height = max(tops + [leg.top_z]) + CARRY_CLEARANCE + length / 2.0
+            self._carry(held, pick, place, height)
             self._lower(place)
             if not self._arm.in_contact:
                 raise MotionFailed("the fingers stopped feeling the leg on the way over")
             self._release()
         finally:
             self._scene.detach("carried")
-        self._lift_off(place, length)
-
-    def _carry_leg(
-        self, held: np.ndarray, centre: np.ndarray, reach: np.ndarray, spot: np.ndarray, length: float
-    ) -> np.ndarray:
-        """Carry an upright leg to just above ``spot``; return the pose to lower it to.
-
-        Upright all the way, round the base at a height that clears any leg
-        already standing (`carry_upright()`). If that path is refused, the
-        planner is asked for a way to the nearest standing pose instead, with
-        the arm kept in its usual shape.
-        """
-        tops = [box.top_z for name, box in self._known.items() if name.startswith("leg_standing")]
-        clear = max(tops + [self._floor_z + TURN_CLEARANCE]) + CARRY_CLEARANCE
-        height = max(centre[2], clear + length / 2.0)
-        end = spot + WORLD_Z * (length / 2.0 + DROP)
-        path = carry_upright(held, centre, reach, end, height, BASE_POSITION)
-        try:
-            self._arm.move_linear(path, speed=CARRY_SPEED)
-            return upright_tool_pose(held, end, _outward(spot))
-        except MotionFailed as failure:
-            self._log.info(f"{failure}; letting the planner carry it instead")
-        options = standing_leg_poses(held, spot, length, DROP, _outward(spot))
-        index = self._arm.move_to_first(
-            [shifted(pose, WORLD_Z * LOWER_FROM) for pose in options], speed=CARRY_SPEED, any_shape=False
-        )
-        return options[index]
-
-    def _turn_upright(self, held: np.ndarray, lifted: np.ndarray) -> np.ndarray:
-        """Turn a held leg upright where it is.
-
-        It ends with the gripper pointing out along the arm's reach if that
-        can be done, back towards the base if not, and only as a last resort
-        pointing whichever way the leg happened to lie. Each is a slow straight
-        path, checked against everything in the room. There is deliberately no
-        fall back to a free planned move here: with a tall part in hand near
-        the floor, that is where parts get flung.
-
-        The turn does not have to finish exactly. It only has to bring the leg
-        close to upright, round its own middle; the carry that follows goes to
-        the exact standing pose. So a turn that gets nine tenths of the way is
-        good enough.
-        """
-        out = _outward(lifted[:3, 3])
-        for reach in (out, -out, None):
-            try:
-                turn = turned_upright(held, lifted, reach)
-                fraction = self._arm.move_linear(turn, speed=CARRY_SPEED, min_fraction=0.9)
-                if fraction < 0.999:
-                    self._log.info(f"turned the leg {fraction:.0%} of the way upright")
-                return turn[-1][:3, 2]
-            except MotionFailed as failure:
-                self._log.debug(f"could not turn the leg that way: {failure}")
-        raise MotionFailed("could not turn the leg upright")
+        # Straight up, so the open fingers slide off the top of the leg.
+        self._arm.move_linear(shifted(place, WORLD_Z * (LEG_GRIP_DEPTH + LIFT)), avoid_collisions=False)
 
     def _check_standing(self, spot: np.ndarray) -> Box | None:
         """The standing leg nearest ``spot``, if one is there."""
@@ -513,7 +476,7 @@ class AssembleTableTask:
     # ------------------------------------------------------------------ top
 
     def _install_top(self, top: Box, plan: TablePlan, legs: list[Box]) -> None:
-        """Pick the top up by its upper edge and lay it on the legs.
+        """Pick the top up by its near edge and lay it on the legs.
 
         It goes where the legs really are, not where they were planned to be:
         its centre over the middle of the four, at the height of the tallest.
@@ -523,28 +486,31 @@ class AssembleTableTask:
         thickness = float(top.size[2])
         open_width = min(thickness + 0.030, GRIPPER_MAX_OPENING)
 
+        # As with a leg: a grip is only used if the top can be laid on the legs with it.
+        choices = []
+        for pick in top_pick_poses(top, BASE_POSITION):
+            wrist = self._arm.wrist_side(backed_off(pick, TOP_APPROACH))
+            place = level_top_pose(hold(top, pick), centre, plan.outward, pick[:3, 1])
+            if wrist is not None and self._reachable([place], wrist) is not None:
+                choices.append((pick, place))
+        if not choices:
+            raise TaskFailed("there is no way to lay the top on the legs from where it lies")
+
         self._arm.open_gripper(open_width)
-        options = top_pick_poses(top)
-        pick = options[self._arm.move_to_first([backed_off(pose, TOP_APPROACH) for pose in options])]
-        self._approach(pick)
+        pick, place = choices[self._arm.move_to_first([backed_off(p, TOP_APPROACH) for p, _ in choices])]
         self._forget("top")
+        self._approach(pick)
         self._grip(thickness)
 
         held = hold(top, pick)
         self._scene.attach("carried", top, pick)
         try:
-            # Straight up first, unchecked: the top starts off touching the
-            # floor and the wall, so MoveIt would refuse any move from there.
-            # Lifting it moves its back away from the wall as well as up.
-            self._arm.move_linear(shifted(pick, WORLD_Z * LIFT), avoid_collisions=False, speed=CARRY_SPEED)
-            options = level_top_poses(held, centre, plan.outward)
-            place = options[
-                self._arm.move_to_first(
-                    [shifted(pose, WORLD_Z * LOWER_FROM) for pose in options],
-                    speed=CARRY_SPEED,
-                    any_shape=False,
-                )
-            ]
+            # Straight up first, unchecked: the top starts off resting on the
+            # stands, so MoveIt would refuse any move from there.
+            lifted = shifted(pick, WORLD_Z * LIFT)
+            self._arm.move_linear(lifted, avoid_collisions=False, speed=CARRY_SPEED)
+            centre_height = (lifted @ np.linalg.inv(held))[2, 3]
+            self._carry(held, lifted, place, max(centre_height, centre[2] + LOWER_FROM))
             self._lower(place)
             if not self._arm.in_contact:
                 raise TaskFailed("the top slipped out of the gripper on the way over")
@@ -602,6 +568,36 @@ class AssembleTableTask:
 
     # ------------------------------------------------------------ utilities
 
+    def _reachable(self, poses: list[np.ndarray], wrist: float) -> np.ndarray | None:
+        """The first pose a held part could be put down from, or ``None``.
+
+        The arm has to be able to reach the pose itself and the one it is
+        lowered from, without hitting anything it knows of, and with its wrist
+        flipped the way it will be: the way it was when it picked the part up.
+        """
+        for pose in poses:
+            if self._arm.can_reach(pose, wrist=wrist) and self._arm.can_reach(
+                shifted(pose, WORLD_Z * LOWER_FROM), wrist=wrist
+            ):
+                return pose
+        return None
+
+    def _carry(self, held: np.ndarray, start: np.ndarray, place: np.ndarray, height: float) -> None:
+        """Carry a held part up to ``height`` and round the base to above ``place``.
+
+        ``height`` is where the part's centre travels. Round the base on an
+        arc first (`carry_round()`), because that never tips the part. If that
+        path is refused, the planner is asked for a way to the end of it, with
+        the arm kept in its usual shape.
+        """
+        path = carry_round(held, start, place, height, BASE_POSITION)
+        try:
+            self._arm.move_linear(path, speed=CARRY_SPEED)
+            return
+        except MotionFailed as failure:
+            self._log.info(f"{failure}; letting the planner carry it instead")
+        self._arm.move_to(path[-1], speed=CARRY_SPEED, any_shape=False)
+
     def _grip(self, width: float) -> None:
         """Close the fingers across a part ``width`` wide, and make sure they feel it."""
         self._arm.set_gripper(max(width - GRIP_SQUEEZE, 0.0))
@@ -629,10 +625,7 @@ class AssembleTableTask:
         Straight down, checked against everything MoveIt knows about — the
         floor, the parts, and the arm itself. The part stops 3 mm short of
         whatever it is being set on, so the checking does not get in the way
-        of setting it down; what it catches is the arm. Folded up tight to
-        reach the near legs, the arm can come down into the floor or into
-        itself before the part gets there, and an unchecked line once drove it
-        into something and stalled 9 cm short.
+        of setting it down; what it catches is the arm.
 
         If the straight line is refused, the planner is asked for a way down
         with the arm in its usual shape.
@@ -667,21 +660,11 @@ class AssembleTableTask:
     def _release(self) -> None:
         """Let go of a part that has just been set down.
 
-        The fingers open all the way, not just clear of the part. A tall thin
-        leg that has only just been stood up falls over if a finger so much as
-        brushes it as the gripper backs away.
+        The fingers open all the way, not just clear of the part. A leg that
+        has only just been set down falls over if a finger so much as brushes
+        it as the gripper moves away.
         """
         self._arm.set_gripper(GRIPPER_MAX_OPENING)
-
-    def _lift_off(self, place: np.ndarray, length: float) -> None:
-        """Lift the open gripper straight up off a leg it has just stood up.
-
-        Up, not back. The fingers are either side of the leg's middle, and
-        lifting slides them up and off its top. Pulling back instead, towards
-        the arm's base, folds an arm that is already folded tight for the near
-        legs further still, until it cannot move at all.
-        """
-        self._arm.move_linear(shifted(place, WORLD_Z * (length / 2.0 + LIFT)), avoid_collisions=False)
 
     def _pull_out(self, place: np.ndarray, distance: float) -> None:
         """Pull the open gripper back out of the top, then lift clear.
@@ -697,12 +680,12 @@ class AssembleTableTask:
         self._reach(shifted(away, WORLD_Z * LIFT))
 
     def _approach(self, pose: np.ndarray) -> None:
-        """The last few centimetres onto the top's edge.
+        """The last few centimetres in over the top's edge.
 
-        Checked if possible. The wall is in the scene as measured, and the
-        finger on its side passes a couple of centimetres above it, so a wall
-        measured a little fat can make the checked line refuse. The line is
-        short and starts from a pose reached under checking, so it is then run
+        Checked if possible. The stands are in the scene as measured, and the
+        finger under the board passes between them, so a stand measured a
+        little fat can make the checked line refuse. The line is short and
+        starts from a pose reached under checking, so it is then run
         unchecked rather than given up on.
         """
         try:
@@ -738,15 +721,3 @@ class AssembleTableTask:
             self._log.info(f"  leg, {describe(leg.size)}, at {np.round(leg.centre[:2], 3).tolist()}")
         for box in room.unknown:
             self._log.warning(f"  something coloured that is neither a leg nor a top, {describe(box.size)}")
-
-
-def _outward(point: np.ndarray) -> np.ndarray:
-    """Level unit vector from the arm's base towards ``point``."""
-    direction = np.array([point[0] - BASE_POSITION[0], point[1] - BASE_POSITION[1], 0.0])
-    return direction / np.linalg.norm(direction)
-
-
-def _up_the_face(top: Box) -> np.ndarray:
-    """The in-plane axis of the top that points most upwards."""
-    index, sign = gripped_axis(top)
-    return top.axis(index) * sign
