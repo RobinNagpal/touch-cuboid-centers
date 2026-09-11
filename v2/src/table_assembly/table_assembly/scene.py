@@ -2,7 +2,7 @@
 
 MoveIt plans against its own picture of the room, not against Gazebo, and at
 the start that picture is empty: the arm has not looked yet. Everything in it
-is put there from measurements — the floor once it has been found, the wall
+is put there from measurements — the floor once it has been found, the stands
 and the parts every time they are seen or moved.
 
 There are two pictures to keep up to date, not one. ``move_group`` holds one,
@@ -84,7 +84,7 @@ class PlanningSceneClient:
         """Say that the arm is now holding this part.
 
         Until the part is attached, MoveIt plans as if the gripper were empty
-        and will happily sweep whatever is in it through the wall.
+        and will happily sweep whatever is in it through a standing leg.
         """
         in_tool = np.linalg.inv(tool_pose) @ part.pose
         held = _box(name, Box(in_tool[:3, 3], in_tool[:3, :3], part.size))

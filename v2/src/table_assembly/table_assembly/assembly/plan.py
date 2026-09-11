@@ -1,8 +1,8 @@
-"""Planning the table: where to build it and where each leg has to stand.
+"""Planning the table: where each leg has to stand, and where the top goes.
 
-Everything is worked out from measurements. The top's size decides where the
-legs go, the legs' length decides how high the top ends up, and the free floor
-the camera saw decides where the whole thing is built.
+The table is always built in the same place, ``SITE``. Everything else is
+worked out from measurements: the top's size decides where the legs go, and
+the legs' length decides how high the top ends up.
 
 Plain numpy, no ROS, so it can be tested on its own.
 """
@@ -16,15 +16,22 @@ import numpy as np
 
 from ..geometry import Box
 
+# Where the table is built, in the world frame: straight in front of the arm,
+# close enough that the far legs are well inside its reach, and far enough out
+# that it does not fold up tight at the top's near edge. At 55 cm, pulling the
+# gripper back out from under the top folded the arm into itself. This is the
+# arm's choice of where to work, not a fact about the room, so it is still
+# looked at and has to be empty.
+SITE = np.array([0.60, 0.0])
+
 # How far in from the edges of the top a leg's outer faces stand. Flush with
 # the edge looks right, but then a leg placed a few millimetres off would stick
 # out from under the top, or have the top's edge land on it.
 LEG_INSET = 0.012
 
-# How much empty floor the table needs around it. The arm reaches in from the
-# side nearest its base with the gripper held level, so the gripper body and
-# wrist need space beside every leg.
-SITE_CLEARANCE = 0.12
+# How much empty floor the table needs around it: room for the gripper and the
+# fingers beside every leg.
+SITE_CLEARANCE = 0.08
 
 
 @dataclass(frozen=True)
@@ -37,24 +44,13 @@ class TablePlan:
     outward: np.ndarray  # horizontal unit vector from the arm's base towards the table
 
 
-def gripped_axis(top: Box) -> tuple[int, float]:
-    """Which of the top's two in-plane axes points up the slope, and its sign.
-
-    The top is picked up by the edge that is highest, and that edge is at the
-    positive or negative end of whichever in-plane axis leans most upwards.
-    """
-    index = 0 if abs(top.axis(0)[2]) > abs(top.axis(1)[2]) else 1
-    return index, 1.0 if top.axis(index)[2] >= 0.0 else -1.0
-
-
 def table_footprint(top: Box) -> tuple[float, float]:
     """(side along the edge facing the arm, side reaching away from the arm).
 
-    The top is carried by one edge and set down with that edge nearest the
-    arm, so the edge that was gripped becomes the near side of the table.
+    The top is picked up by a long edge and set down with that edge nearest
+    the arm, so the table is as long across the arm's view as the top is long.
     """
-    index, _ = gripped_axis(top)
-    return float(top.size[1 - index]), float(top.size[index])
+    return float(top.size[0]), float(top.size[1])
 
 
 def plan_table(
@@ -97,49 +93,20 @@ def plan_table(
     return TablePlan(table=table, top=top_box, leg_spots=tuple(spots), outward=outward)
 
 
-def choose_site(
-    footprint: tuple[float, float],
-    obstacles: list[Box],
-    base: np.ndarray,
-    *,
-    radii: tuple[float, ...],
-    preferred_radius: float,
-    clearance: float = SITE_CLEARANCE,
-) -> np.ndarray | None:
-    """The centre of a patch of floor the table fits on, or ``None``.
-
-    Candidate centres are tried on rings round the base at every 5 degrees.
-    A candidate is kept only if nothing the camera saw is within ``clearance``
-    of the table's footprint, and of those, the one straight in front of the
-    arm at its most comfortable reach wins. That preference is the arm's, not
-    knowledge of the room: every candidate still has to be proved empty.
-    """
-    samples = (
-        np.concatenate([_footprint_samples(box) for box in obstacles]) if obstacles else np.zeros((0, 2))
-    )
-    length, depth = footprint
-
-    best: tuple[float, float, np.ndarray] | None = None
-    for radius in radii:
-        for azimuth_deg in range(-180, 180, 5):
-            azimuth = math.radians(azimuth_deg)
-            centre = base[:2] + radius * np.array([math.cos(azimuth), math.sin(azimuth)])
-            candidate = Box.upright(
-                (centre[0], centre[1], 0.0), azimuth + math.pi / 2.0, (length, depth, 0.0)
-            )
-            if len(samples) and float(candidate.footprint_distance(samples).min()) < clearance:
-                continue
-            score = (abs(azimuth), abs(radius - preferred_radius))
-            if best is None or score < best[:2]:
-                best = (*score, centre)
-    return None if best is None else best[2]
+def in_the_way(plan: TablePlan, things: list[Box], clearance: float = SITE_CLEARANCE) -> list[Box]:
+    """Whatever the camera saw on or beside the patch of floor the table needs."""
+    return [
+        box
+        for box in things
+        if float(plan.table.footprint_distance(_footprint_samples(box)).min()) < clearance
+    ]
 
 
 def _footprint_samples(box: Box, step: float = 0.02) -> np.ndarray:
     """Points spread through a box, seen from above.
 
     Sampling the whole volume rather than the corners means a box at any
-    angle — the leaning top included — is covered by the same code.
+    angle is covered by the same code.
     """
     counts = [max(2, math.ceil(side / step) + 1) for side in box.size]
     grids = np.meshgrid(*[np.linspace(-s / 2.0, s / 2.0, n) for s, n in zip(box.size, counts, strict=True)])

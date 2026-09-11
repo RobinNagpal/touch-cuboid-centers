@@ -5,8 +5,8 @@
   <version>0.1.0</version>
   <description>
     The simulated cell and the task that runs in it: a UR5e with a wrist
-    camera measures a table top leaning against a wall, stands four legs up
-    to fit it, and puts the top on them.
+    camera measures a table top lying on two stands, stands four legs where
+    a top that size needs them, and puts the top on them.
   </description>
   <maintainer email="robinnagpal.tiet@gmail.com">Robin Nagpal</maintainer>
   <license>Apache-2.0</license>

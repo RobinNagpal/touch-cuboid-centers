@@ -50,10 +50,14 @@ def test_a_leaning_board_is_measured(lean_deg, size):
     assert abs(float(fitted.axis(2) @ board.axis(2))) == pytest.approx(1.0, abs=1e-4)
 
 
-def test_a_level_board_can_be_fitted_too():
-    board = Box.upright((0.5, 0.0, 0.14), 0.2, (0.28, 0.18, 0.018))
-    fitted = fit_plate(visible_surface(board, np.array([0.3, 0.0, 0.6])))
-    assert fitted.size[:2] == pytest.approx([0.28, 0.18], abs=0.002)
+@pytest.mark.parametrize("size", [(0.28, 0.18, 0.018), (0.24, 0.16, 0.016)])
+def test_a_level_board_is_measured(size):
+    board = Box.upright((0.0, 0.57, 0.094), 1.7, size)
+    # Seen from the arm's side and above, as the arm does: the upper face and
+    # the near side, which is what gives the thickness.
+    fitted = fit_plate(visible_surface(board, np.array([0.0, 0.33, 0.41])))
+    assert fitted.size == pytest.approx(np.array(size), abs=0.0015)
+    assert fitted.centre == pytest.approx(board.centre, abs=0.0015)
     assert fitted.axis(2)[2] == pytest.approx(1.0, abs=1e-3)
 
 

@@ -32,7 +32,7 @@ setup(
     zip_safe=True,
     maintainer="Robin Nagpal",
     maintainer_email="robinnagpal.tiet@gmail.com",
-    description="Measure a table top, stand four legs up to fit it, and put the top on them.",
+    description="Measure a table top, stand four legs where it needs them, and put the top on them.",
     license="Apache-2.0",
     entry_points={
         "console_scripts": [

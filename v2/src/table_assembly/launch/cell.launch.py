@@ -1,7 +1,7 @@
 """Start the simulated cell: Gazebo, the robot, its controllers and the bridge.
 
 The world file is written fresh on every start, because the room in it — the
-wall, the table top and the legs — is random. ``seed`` makes any one room
+stands, the table top and the legs — is random. ``seed`` makes any one room
 repeatable.
 """
 
@@ -17,6 +17,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
     IncludeLaunchDescription,
+    LogInfo,
     OpaqueFunction,
     RegisterEventHandler,
     SetEnvironmentVariable,
@@ -33,6 +34,9 @@ from table_assembly.world.spawn import random_room
 
 PACKAGE = "table_assembly"
 
+# How many times a controller spawner is started before giving up on it.
+SPAWNER_ATTEMPTS = 3
+
 
 def robot_description(share: Path) -> str:
     """Run the xacro and hand back the finished URDF."""
@@ -45,44 +49,53 @@ def robot_description(share: Path) -> str:
 
 
 def write_world(share: Path, seed: int) -> str:
-    """Put this run's wall and parts into the room and write out the world file."""
+    """Put this run's stands and parts into the room and write out the world file."""
     sdf = build_world(read_template(share), random_room(seed))
     path = Path(tempfile.mkdtemp(prefix="table_assembly_")) / "cell.sdf"
     path.write_text(sdf)
     return str(path)
 
 
-def _chain_spawners(*names: str) -> list:
-    """Spawner nodes, each one starting only once the one before it has finished.
+def _chain_spawners(names: list[str], attempts: int = SPAWNER_ATTEMPTS) -> list:
+    """A spawner for the first controller, and what to do when it finishes.
+
+    Each controller is only started once the one before it is running, and a
+    spawner that fails is started again rather than skipped.
 
     The spawner's own timeouts assume a controller manager that is up in a few
     seconds. Inside Gazebo it only exists once the robot has been spawned and
     its hardware brought up, and on a cold start — the first run after an
-    install, with nothing cached yet — that took well over a minute. A spawner
-    that gives up first leaves the arm with no joint states and the run hangs,
-    so they are told to wait as long as it takes.
+    install, with nothing cached yet — that took over four minutes. Even told
+    to wait that long, a spawner started that early has been seen to find the
+    controller manager and then never hear back from it, while a fresh one
+    started afterwards was answered at once. Skipping a controller that did
+    not load leaves the arm with no joint states and the run hangs, so the
+    next one is only started once this one has really succeeded.
     """
-    spawners = [
-        Node(
-            package="controller_manager",
-            executable="spawner",
-            output="screen",
-            arguments=[
-                name,
-                "--controller-manager",
-                "/controller_manager",
-                "--controller-manager-timeout",
-                "300",
-                "--service-call-timeout",
-                "60",
-            ],
-        )
-        for name in names
-    ]
-    actions = [spawners[0]]
-    for previous, following in zip(spawners, spawners[1:], strict=False):
-        actions.append(RegisterEventHandler(OnProcessExit(target_action=previous, on_exit=[following])))
-    return actions
+    name, rest = names[0], names[1:]
+    spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        output="screen",
+        arguments=[
+            name,
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "300",
+            "--service-call-timeout",
+            "60",
+        ],
+    )
+
+    def next_step(event, context):
+        if event.returncode == 0:
+            return _chain_spawners(rest) if rest else []
+        if attempts > 1:
+            return [LogInfo(msg=f"starting the {name} spawner again"), *_chain_spawners(names, attempts - 1)]
+        return [LogInfo(msg=f"gave up on {name} after {SPAWNER_ATTEMPTS} attempts; the arm will not move")]
+
+    return [spawner, RegisterEventHandler(OnProcessExit(target_action=spawner, on_exit=next_step))]
 
 
 def setup(context, *args, **kwargs):
@@ -137,7 +150,7 @@ def setup(context, *args, **kwargs):
         # One controller at a time. Three spawners racing each other into a
         # controller manager that is still starting up is enough to make one of
         # them try to configure a controller another has already activated.
-        *_chain_spawners("joint_state_broadcaster", "arm_controller", "gripper_controller"),
+        *_chain_spawners(["joint_state_broadcaster", "arm_controller", "gripper_controller"]),
         Node(
             package="rviz2",
             executable="rviz2",

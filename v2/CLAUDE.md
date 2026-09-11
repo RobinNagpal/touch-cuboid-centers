@@ -2,10 +2,11 @@
 
 ## What this repo is
 
-One task, done properly: a UR5e in Gazebo finds a table top leaning against a
-wall and four legs lying on the floor, measures them, stands the legs up to
-fit the top, and puts the top on them. Read [`README.md`](README.md) first,
-then [`PSEUDOCODE.md`](PSEUDOCODE.md) for what every file and function is for,
+One task, done properly: a UR5e in Gazebo finds a table top lying on two
+stands and four legs standing on the floor, measures them, stands the legs
+where a top that size needs them, and puts the top on them. Read
+[`README.md`](README.md) first, then [`PSEUDOCODE.md`](PSEUDOCODE.md) for what
+every file and function is for,
 [`ARCHITECTURE.md`](ARCHITECTURE.md) for the layout, and
 [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md) for why it is built the
 way it is.
@@ -28,8 +29,10 @@ leaves its ROS endpoints registered and the next run will stall on them.
 ## The one rule that matters
 
 The robot is told nothing about the room. It knows where its own base is and
-how its own tooling is built (`arm/dimensions.py`), and everything else — the
-floor height, the wall, the top's size and pose, the legs — it measures.
+how its own tooling is built (`arm/dimensions.py`), and it always builds on
+the same spot in front of it (`SITE` in `assembly/plan.py`), which is its own
+choice of where to work. Everything else — the floor height, the stands, the
+top's size and pose, the legs — it measures.
 
 - `world/` is the simulator's side. It decides the sizes and positions of
   everything, and **nothing outside `world/` may import from it.**

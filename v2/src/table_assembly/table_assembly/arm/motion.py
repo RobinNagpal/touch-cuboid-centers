@@ -1,7 +1,7 @@
 """The arm, its gripper, and the fingertip contact sensors.
 
 Planning goes through MoveIt: free moves are planned by OMPL and can bend
-around the wall and the parts, while approaches and retreats use MoveIt's
+around the stands and the parts, while approaches and retreats use MoveIt's
 Cartesian path service so the gripper travels in a straight line onto a part
 instead of arriving from wherever the planner fancied.
 
@@ -10,6 +10,7 @@ Poses are 4x4 matrices for tool0 in the world frame.
 
 from __future__ import annotations
 
+import copy
 import time
 
 import numpy as np
@@ -40,6 +41,15 @@ FINGER_JOINTS = ("left_finger_joint", "right_finger_joint")
 FULL_TURN_JOINTS = (0, 1, 3, 4, 5)
 ELBOW = 2
 
+# How far inside a full turn either way those joints are kept. Always taking
+# the angle nearest where a joint already is lets it creep, move by move, to
+# the end of its travel, and then the next straight line that needs it to go
+# on turning the same way stops part way. After four legs carried round the
+# base, the line in to the table top's edge stopped a third of the way for
+# that alone, with the last wrist joint at exactly a full turn.
+END_STOP_MARGIN = 0.5  # radians
+WRIST_2 = 4
+
 # A contact report older than this is treated as stale: the sensor only
 # publishes while surfaces are actually touching.
 CONTACT_FRESHNESS = 0.4
@@ -52,6 +62,11 @@ ARRIVAL_ANGLE = 0.03  # radians
 
 def _describe(pose: np.ndarray) -> str:
     return str(np.round(pose[:3, 3], 3).tolist())
+
+
+def _wrist_side(joints) -> float:
+    """Which way the wrist is flipped: the side of the arm the middle wrist joint bends to."""
+    return 1.0 if np.sin(joints[WRIST_2]) >= 0.0 else -1.0
 
 
 class MotionFailed(RuntimeError):
@@ -87,6 +102,7 @@ class Arm:
         )
         self._tf = Buffer()
         self._tf_listener = TransformListener(self._tf, node)
+        self._missed = ""
 
     # --------------------------------------------------------------- startup
 
@@ -115,6 +131,7 @@ class Arm:
         near: np.ndarray | None = None,
         speed: float | None = None,
         any_shape: bool = True,
+        wrist: float | None = None,
     ) -> None:
         """Plan a free move that puts the tip link at ``pose``.
 
@@ -137,11 +154,18 @@ class Arm:
         flipping over on the way, and a part held by friction does not survive
         that. Then the move fails instead, and the caller tries another pose.
 
+        ``wrist`` pins which way the wrist is flipped (see `wrist_side()`).
+        Without a part in hand it is free. With one (``any_shape`` off) it
+        stays the way it is now: flipping the wrist over means turning the
+        part through half a circle on the way.
+
         ``speed`` scales the arm's joint speeds and accelerations, for moves
         carrying something held only by friction.
         """
         self._planner.set_start_state_to_current_state()
-        target = self._solve(pose, near)
+        if wrist is None and not any_shape:
+            wrist = self.current_wrist_side()
+        target = self._solve(pose, near, wrist, explain=True)
         result = None
         if target is not None:
             self._planner.set_goal_state(robot_state=target)
@@ -153,7 +177,8 @@ class Arm:
             self._planner.set_goal_state(pose_stamped_msg=goal, pose_link=self._tip_link)
             result = self._plan(speed)
         if not result:
-            raise MotionFailed(f"no plan found to {_describe(pose)}")
+            why = "the planner found no way there" if target is not None else self._missed
+            raise MotionFailed(f"no plan found to {_describe(pose)}: {why}")
         self._moveit.execute(result.trajectory, controllers=[])
         self._check_arrival(pose)
 
@@ -172,49 +197,101 @@ class Arm:
         parameters.max_acceleration_scaling_factor = speed
         return self._planner.plan(parameters)
 
-    def _solve(self, pose: np.ndarray, near: np.ndarray | None) -> RobotState | None:
+    def _solve(
+        self, pose: np.ndarray, near: np.ndarray | None, wrist: float | None = None, *, explain: bool = False
+    ) -> RobotState | None:
         """Joint angles that put the tip link at ``pose``, found starting from ``near``.
 
         ``near`` decides which of the arm's shapes is used; where the arm is
         now decides only which of each joint's equivalent angles. If the
         search from ``near`` fails, it is tried once more from where the arm
         is now. An answer with the elbow bent the other way from the posture
-        it was searched from is a different shape of arm, and is not taken.
+        it was searched from is a different shape of arm, and is not taken;
+        nor is one with the wrist flipped the other way from ``wrist``, when
+        that is given. With ``explain``, what an answer would hit is logged.
 
         Every joint but the elbow can turn a full circle each way, so each has
         two angles that put the arm in exactly the same place, a full turn
         apart. The solver does not care which it returns, and the planner then
         dutifully takes the arm the long way round, swinging whatever it holds
         through a full circle. So each joint is brought to whichever of its
-        two angles is nearer where it is now.
+        two angles is nearer where it is now, as long as that leaves it room
+        to keep turning (`END_STOP_MARGIN`).
         """
+        # Why the last search came back empty, for the error message.
+        self._missed = "no joint angles reach it"
         with self._moveit.get_planning_scene_monitor().read_only() as scene:
             current = np.array(scene.current_state.get_joint_group_positions(self._group), dtype=float)
-        if near is None:
-            near = self.looking_towards(float(np.arctan2(pose[1, 3], pose[0, 3])))
+            if near is None:
+                near = self.looking_towards(float(np.arctan2(pose[1, 3], pose[0, 3])))
 
-        for seed in (np.asarray(near, dtype=float), current):
-            state = RobotState(self._model)
-            state.set_joint_group_positions(self._group, seed)
-            state.update()
-            if not state.set_from_ik(self._group, make_pose(pose[:3, 3], pose[:3, :3]), self._tip_link, 0.5):
-                continue
-            joints = np.array(state.get_joint_group_positions(self._group), dtype=float)
-            if np.sign(joints[ELBOW]) != np.sign(seed[ELBOW]):
-                continue
-            for index in FULL_TURN_JOINTS:
-                nearest = current[index] + (joints[index] - current[index] + np.pi) % (2 * np.pi) - np.pi
-                if abs(nearest) <= 2 * np.pi:
-                    joints[index] = nearest
-            state.set_joint_group_positions(self._group, joints)
-            state.update()
+            for seed in (np.asarray(near, dtype=float), current):
+                # A copy of the arm as it is, so the collision check below has
+                # the fingers open as wide as they really are, and whatever
+                # the gripper is holding, rather than a closed empty gripper.
+                state = copy.copy(scene.current_state)
+                state.set_joint_group_positions(self._group, seed)
+                state.update()
+                if not state.set_from_ik(
+                    self._group, make_pose(pose[:3, 3], pose[:3, :3]), self._tip_link, 0.5
+                ):
+                    continue
+                joints = np.array(state.get_joint_group_positions(self._group), dtype=float)
+                if np.sign(joints[ELBOW]) != np.sign(seed[ELBOW]):
+                    self._missed = "only with the elbow bent the other way"
+                    continue
+                if wrist is not None and _wrist_side(joints) != wrist:
+                    self._missed = "only with the wrist flipped the other way"
+                    continue
+                for index in FULL_TURN_JOINTS:
+                    turns = [joints[index] + k * 2 * np.pi for k in (-2, -1, 0, 1, 2)]
+                    turns = [a for a in turns if abs(a) <= 2 * np.pi - END_STOP_MARGIN]
+                    if turns:
+                        joints[index] = min(turns, key=lambda a: abs(a - current[index]))
+                state.set_joint_group_positions(self._group, joints)
+                state.update()
 
-            # The answer is checked rather than trusted: the solver has been
-            # seen to report success with a configuration that is somewhere else.
-            reached = state.get_pose(self._tip_link).position
-            if np.linalg.norm(np.array([reached.x, reached.y, reached.z]) - pose[:3, 3]) < 0.001:
+                # The answer is checked rather than trusted: the solver has been
+                # seen to report success with a configuration that is somewhere else.
+                reached = state.get_pose(self._tip_link).position
+                if np.linalg.norm(np.array([reached.x, reached.y, reached.z]) - pose[:3, 3]) >= 0.001:
+                    continue
+                # An answer that puts the arm through the floor or a part is no
+                # answer. Handed to the planner, it fails anyway, after ten
+                # seconds and a screenful of errors.
+                if scene.is_state_colliding(
+                    robot_state=state, joint_model_group_name=self._group, verbose=explain
+                ):
+                    self._missed = "every way of reaching it hits something (see the contacts logged above)"
+                    continue
                 return state
         return None
+
+    def can_reach(self, pose: np.ndarray, *, wrist: float | None = None) -> bool:
+        """Whether the arm can put the tip link at ``pose`` without hitting anything it knows of.
+
+        Asked before picking a part up, about where it will be put down: a part
+        picked up and then found to have nowhere to go gets dropped wherever
+        the arm happens to be. ``wrist`` is the way the wrist will be flipped
+        when it gets there, because the arm cannot flip it with a part in hand.
+        """
+        return self._solve(pose, None, wrist) is not None
+
+    def wrist_side(self, pose: np.ndarray) -> float | None:
+        """Which way the wrist is flipped when `move_to()` puts the tool at ``pose``.
+
+        A 6-axis arm can reach most poses with its wrist flipped either way,
+        and no straight-line move can turn one into the other: it would have
+        to pass through the point where two wrist axes line up. So whichever
+        way the wrist is when a part is picked up is the way it stays until
+        the part is put down. +1 or -1, or ``None`` if the pose is out of reach.
+        """
+        state = self._solve(pose, None)
+        return None if state is None else _wrist_side(state.get_joint_group_positions(self._group))
+
+    def current_wrist_side(self) -> float:
+        with self._moveit.get_planning_scene_monitor().read_only() as scene:
+            return _wrist_side(scene.current_state.get_joint_group_positions(self._group))
 
     @property
     def planning_scene_monitor(self):
@@ -240,6 +317,7 @@ class Arm:
         near: np.ndarray | None = None,
         speed: float | None = None,
         any_shape: bool = True,
+        wrist: float | None = None,
     ) -> int:
         """Try each pose in turn and stop at the first one that plans.
 
@@ -248,7 +326,7 @@ class Arm:
         """
         for index, pose in enumerate(poses):
             try:
-                self.move_to(pose, near=near, speed=speed, any_shape=any_shape)
+                self.move_to(pose, near=near, speed=speed, any_shape=any_shape, wrist=wrist)
                 return index
             except MotionFailed as failure:
                 if index == len(poses) - 1:
@@ -282,6 +360,9 @@ class Arm:
 
         request = GetCartesianPath.Request()
         request.header.frame_id = WORLD_FRAME
+        # Start from wherever the arm is now. Without this, move_group logs an
+        # error about the empty start state on every straight line.
+        request.start_state.is_diff = True
         request.group_name = self._group
         request.link_name = self._tip_link
         request.waypoints = [make_pose(p[:3, 3], p[:3, :3]) for p in waypoints]
@@ -346,13 +427,18 @@ class Arm:
 
     # --------------------------------------------------------------- gripper
 
-    def set_gripper(self, opening: float, *, seconds: float = 1.0, settle: float = 3.0) -> float:
+    def set_gripper(self, opening: float, *, seconds: float = 1.0, settle: float = 5.0) -> float:
         """Command the gap between the fingers, in metres, and wait for them to finish.
 
-        Finished means at the gap asked for, or stopped against something, as
-        read from the finger joints themselves. The controller's own report
-        is no help here: it declares the move done at once whatever the
-        fingers did. Returns the gap they ended at.
+        Finished means both fingers where they were sent, or both stopped
+        short against something, as read from the finger joints themselves.
+        The controller's own report is no help here: it declares the move
+        done at once whatever the fingers did. Each finger is watched on its
+        own, because one sometimes sets off a second or more after the other,
+        and while it has not moved yet the gap is not changing either; judged
+        by the gap alone, that looked like being finished, and the late finger
+        then closed in on a leg as the gripper came down over it and knocked
+        it over. Returns the gap they ended at.
         """
         half = max(0.0, opening) / 2.0
 
@@ -367,14 +453,15 @@ class Arm:
         self._gripper.send_goal(FollowJointTrajectory.Goal(trajectory=trajectory))
 
         deadline = time.monotonic() + settle
-        last, still_since = self.gripper_gap, time.monotonic()
+        last, still_since = self._finger_positions, time.monotonic()
         while time.monotonic() < deadline:
-            gap = self.gripper_gap
-            if abs(gap - opening) < 0.0015:
+            fingers = self._finger_positions
+            arrived = [abs(finger - half) < 0.00075 for finger in fingers]
+            if all(arrived):
                 break
-            if abs(gap - last) > 0.0003:
-                last, still_since = gap, time.monotonic()
-            elif time.monotonic() - still_since > 0.4:
+            if max(abs(finger - before) for finger, before in zip(fingers, last, strict=True)) > 0.0003:
+                last, still_since = fingers, time.monotonic()
+            elif not any(arrived) and time.monotonic() - still_since > 0.4:
                 break
             time.sleep(0.02)
         return self.gripper_gap
@@ -384,11 +471,13 @@ class Arm:
 
         A finger that has stuck — pinned against something by the arm, say —
         leaves the gripper lopsided, and a lopsided gripper lowered over a part
-        lands a finger on top of it instead of beside it.
+        lands a finger on top of it instead of beside it. A finger still wider
+        open than asked is no better: it is on its way in, and it will close
+        on the part as the gripper comes down round it.
         """
         self.set_gripper(opening)
         half = opening / 2.0
-        if min(self._finger_positions) < half - 0.002:
+        if max(abs(finger - half) for finger in self._finger_positions) > 0.002:
             left, right = (p * 1000 for p in self._finger_positions)
             raise MotionFailed(
                 f"the fingers did not open: {left:.0f} mm and {right:.0f} mm out of {half * 1000:.0f}"

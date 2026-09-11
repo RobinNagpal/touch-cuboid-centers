@@ -1,8 +1,8 @@
 # assemble-table
 
-A robot arm builds a small table. It finds a table top leaning against a wall
-and four legs lying on the floor, measures the top, stands the legs up where a
-top that size needs them, then lifts the top and lays it on the legs.
+A robot arm builds a small table. It finds a table top lying on two stands
+and four legs standing on the floor, measures the top, moves the legs to
+where a top that size needs them, then lifts the top and lays it on the legs.
 
 Everything runs in simulation. One command starts it.
 
@@ -10,7 +10,10 @@ Everything runs in simulation. One command starts it.
 make run
 ```
 
-The first run downloads the environment, which is a few gigabytes.
+The first run downloads the environment, which is a few gigabytes. On macOS
+the first run after that is slow too — minutes before the arm moves — because
+every newly installed library is checked the first time it loads. After that
+the cell is up in seconds.
 
 This folder is a project of its own. It shares no code or configuration with
 `../v1`; it only uses the same tools.
@@ -20,23 +23,24 @@ This folder is a project of its own. It shares no code or configuration with
 In the room there are:
 
 - a UR5e arm, bolted to the floor;
-- a low wall somewhere in reach of it;
-- a table top — a thin board — standing on its long edge and leaning back
-  against the wall;
-- four table legs lying on the floor, in no particular arrangement.
+- a table top — a thin board — lying flat on two low grey stands, one under
+  each end, to the arm's left;
+- four table legs standing on end on the floor to the arm's right, in no
+  particular arrangement.
 
 The arm has to:
 
 1. find all of that with its camera;
 2. measure the table top: its length, width and thickness;
 3. work out where each leg has to stand for a top that size;
-4. stand the four legs up on those spots;
+4. move the four legs onto those spots, standing;
 5. pick the top up and put it on the legs.
 
 **The arm is told nothing about the room.** It knows where it is bolted down
-and how its own gripper and camera are built, and that is all. It does not
-know how high the floor is, where the wall is, how big the top is, how far it
-leans, or where the legs are or how long they are. Every one of those is drawn
+and how its own gripper and camera are built, and it always builds the table
+on the same patch of floor in front of it. That is all. It does not know how
+high the floor is, where the top is or how big, or where the legs are or how
+long they are. Every one of those is drawn
 at random for each run, and the arm has to measure them. The only way the
 simulator's numbers could leak to the robot is through the code, and a test
 fails if any robot code so much as imports them.
@@ -52,25 +56,27 @@ steps, looking down and out at the floor. The floor is found as the biggest
 level surface in all those pictures. Everything coloured is a part, everything
 grey standing up off the floor is an obstacle.
 
-**2. Measure the top up close.** The arm goes to the top and looks at it from
-four angles. A plane fitted to its face gives its lean, the spread of points
-across the face gives length and width, and a look down on its upper edge
-gives its thickness.
+**2. Measure the top up close.** The arm looks down on the top from four
+angles on its own side. The spread of points across the upper face gives
+length and width, and the near side face gives its thickness.
 
-**3. Plan the table.** The table is built with the edge the arm picks the top
-up by facing the arm. The legs go just in from the top's corners. The arm
-picks a patch of floor within comfortable reach with nothing on it, measured
-against everything it saw.
+**3. Plan the table.** The table is always built in the same place, 60 cm
+straight in front of the arm, with the top's long edge facing the arm. The
+legs go just in from the top's corners, so where they go depends only on the
+top's measured size. The arm checks the spot is empty first.
 
-**4. Stand up each leg.** The arm grips a leg round its middle from above,
-lifts it, turns it upright about its own centre, carries it to its spot and
-sets it down. Then it looks to check the leg is really standing there, and
-where exactly. A leg that falls over is found again and tried again.
+**4. Move each leg.** Before touching a leg, the arm checks it can reach the
+pose that sets it down on its spot. Then it grips the leg from straight above
+by its top end, lifts it, carries it round above the other legs, lowers it
+onto its spot and lifts off. The leg hangs straight down from the fingers the
+whole way, so nothing tips or turns. Then the arm looks to check the leg is
+really standing there, and where exactly. If an attempt fails, it looks round
+again and tries whichever standing leg it finds.
 
-**5. Lay the top on.** The arm grips the top by the middle of its upper edge,
-with a finger either side of the board, lifts it off the wall, turns it level
-and lowers it onto the legs — onto where the legs actually are, not where they
-were planned to be.
+**5. Lay the top on.** The arm reaches in level over the middle of the top's
+near edge, one finger above the board and one below it, between the stands.
+It lifts the top off, carries it round level, and lowers it onto the legs —
+onto where the legs actually are, not where they were planned to be.
 
 **6. Check the table.** The top and the legs now touch, so the camera sees them
 as one lump, and a box fitted to it is the finished table. The arm reports its
@@ -78,71 +84,67 @@ size, its height against what it should be, and how far from level the top is.
 
 ## What it looks like when it runs
 
-That is seed 1, headless, about seven minutes from start to finish:
+That is seed 1, headless, about four and a half minutes from start to finish:
 
 ```
+[assembly_task]: waiting for the arm's joint states
 [assembly_task]: waiting for the cell to come up
 [assembly_task]: looking round the room
 [assembly_task]: floor at z = 0.1 mm
-[assembly_task]:   obstacle, 44.4 x 9.7 x 7.2 cm, at [-0.165, 0.528]
-[assembly_task]:   table top, 26.0 x 18.0 x 1.8 cm, at [-0.11, 0.49, 0.087]
-[assembly_task]:   leg, 13.1 x 3.3 x 3.4 cm, at [-0.002, -0.452]
-[assembly_task]:   leg, 13.1 x 3.3 x 3.3 cm, at [-0.351, -0.382]
-[assembly_task]:   leg, 13.1 x 3.3 x 3.4 cm, at [0.386, -0.459]
-[assembly_task]:   leg, 13.0 x 3.3 x 3.4 cm, at [-0.059, -0.565]
-[assembly_task]: table top: 26.1 x 18.1 cm, 1.8 cm thick
-[assembly_task]:   standing on its edge, leaning 20.6 degrees back from upright
-[assembly_task]: building a 26.1 x 18.1 cm table, 14.9 cm high, centred at [0.57, 0.0]
-[assembly_task]:   a leg goes at [0.631, -0.102]
-[assembly_task]:   a leg goes at [0.631, 0.102]
-[assembly_task]:   a leg goes at [0.509, -0.102]
-[assembly_task]:   a leg goes at [0.509, 0.102]
+[assembly_task]:   table top, 25.9 x 18.5 x 1.8 cm, at [-0.07, 0.583, 0.095]
+[assembly_task]:   leg, 2.5 x 2.5 x 13.3 cm, at [0.155, -0.462]
+[assembly_task]:   leg, 2.5 x 2.5 x 13.3 cm, at [-0.239, -0.539]
+[assembly_task]:   leg, 2.6 x 2.5 x 13.3 cm, at [-0.312, -0.376]
+[assembly_task]:   leg, 2.5 x 2.5 x 13.3 cm, at [-0.073, -0.4]
+[assembly_task]: table top: 25.6 x 18.0 cm, 1.8 cm thick
+[assembly_task]:   lying 0.0 degrees off level
+[assembly_task]: building a 25.6 x 18.0 cm table, 15.1 cm high, centred at [0.6, 0.0]
+[assembly_task]:   a leg goes at [0.666, -0.103]
+[assembly_task]:   a leg goes at [0.666, 0.103]
+[assembly_task]:   a leg goes at [0.534, -0.103]
+[assembly_task]:   a leg goes at [0.534, 0.103]
 [assembly_task]: --- leg 1 of 4 ---
-[assembly_task]: picking up a 13.1 x 3.3 x 3.4 cm leg
-[assembly_task]: fingers closed to 33 mm on 33 mm
-[assembly_task]: leg standing, 13.1 cm tall, 3 mm from its spot
+[assembly_task]: picking up a 2.6 x 2.5 x 13.3 cm leg
+[assembly_task]: fingers closed to 25 mm on 26 mm
+[assembly_task]: leg standing, 13.3 cm tall, 2 mm from its spot
 [assembly_task]: --- leg 2 of 4 ---
-[assembly_task]: picking up a 13.1 x 3.3 x 3.4 cm leg
-[assembly_task]: fingers closed to 33 mm on 33 mm
-[assembly_task]: turned the leg 96% of the way upright
-[assembly_task]: leg standing, 13.1 cm tall, 12 mm from its spot
+[assembly_task]: picking up a 2.6 x 2.5 x 13.3 cm leg
+[assembly_task]: fingers closed to 25 mm on 26 mm
+[assembly_task]: leg standing, 13.3 cm tall, 2 mm from its spot
 [assembly_task]: --- leg 3 of 4 ---
-[assembly_task]: picking up a 13.1 x 3.3 x 3.4 cm leg
-[assembly_task]: fingers closed to 33 mm on 33 mm
-[assembly_task]: turned the leg 98% of the way upright
-[assembly_task]: leg standing, 13.1 cm tall, 8 mm from its spot
+[assembly_task]: picking up a 2.6 x 2.5 x 13.3 cm leg
+[assembly_task]: fingers closed to 25 mm on 26 mm
+[assembly_task]: leg standing, 13.3 cm tall, 3 mm from its spot
 [assembly_task]: --- leg 4 of 4 ---
-[assembly_task]: picking up a 13.1 x 3.3 x 3.4 cm leg
-[assembly_task]: fingers closed to 33 mm on 33 mm
-[assembly_task]: turned the leg 96% of the way upright
-[assembly_task]: leg standing, 13.1 cm tall, 2 mm from its spot
+[assembly_task]: picking up a 2.6 x 2.5 x 13.3 cm leg
+[assembly_task]: fingers closed to 25 mm on 26 mm
+[assembly_task]: leg standing, 13.3 cm tall, 2 mm from its spot
 [assembly_task]: --- table top ---
 [assembly_task]: fingers closed to 18 mm on 18 mm
-[assembly_task]: table built: 26.0 x 18.3 x 14.9 cm, top 0.0 degrees off level
+[assembly_task]: table built: 25.5 x 18.0 x 15.1 cm, top 0.0 degrees off level
 [assembly_task]: finished
-[assembly_task]:   table top measured at 26.1 x 18.1 x 1.8 cm
-[assembly_task]:   4 legs standing, 13.1 cm long
-[assembly_task]:   table as built: 26.0 x 18.3 x 14.9 cm
-[assembly_task]:   height 14.9 cm, expected 15.0 cm
+[assembly_task]:   table top measured at 25.6 x 18.0 x 1.8 cm
+[assembly_task]:   4 legs standing, 13.3 cm long
+[assembly_task]:   table as built: 25.5 x 18.0 x 15.1 cm
+[assembly_task]:   height 15.1 cm, expected 15.1 cm
 [assembly_task]:   top 0.0 degrees off level
-[assembly_task]:   centre 6 mm from where it was planned
+[assembly_task]:   centre 3 mm from where it was planned
 [assembly_task]:   verdict: a table
 ```
 
-What the simulator had actually put there: a top 26.04 x 17.98 x 1.78 cm
-leaning 20.5°, and legs 13.09 cm long and 3.34 cm square. Afterwards, asked
-directly, Gazebo had the top lying dead level on four upright legs, its
-underside 13.1 cm off the floor.
+What the simulator had actually put there: a top 25.53 x 17.98 x 1.78 cm,
+and legs 13.28 cm long and 2.53 cm square. Afterwards, asked directly, Gazebo
+had the top level to within 0.02°, centred at [0.602, -0.001], its underside
+13.29 cm off the floor, resting on four upright legs.
 
-"12 mm from its spot" is what the camera saw after letting go: legs land a
-few millimetres off where they were aimed, and one that tips a little as the
-fingers open lands further. That is why the top is put down over where the
-legs actually are, rather than over where they were meant to be — "centre
-6 mm from where it was planned" is that correction showing.
+The survey's first look at the top (25.9 x 18.5 cm) is from far off and at a
+slant; the close look (25.6 x 18.0 cm) is the one the plan uses. The stands
+are not listed as obstacles: the top hides most of them, and what shows is
+taken for the top's own shadowed sides.
 
-"turned the leg 96% of the way upright" is the leg being stood up where it lay
-before being carried; see IMPLEMENTATION_NOTES.md for why it does not need to
-finish the turn exactly.
+"2 mm from its spot" is what the camera saw after letting go. The top is put
+down over where the legs actually are, rather than over where they were meant
+to be — "centre 3 mm from where it was planned" is that correction showing.
 
 ## The cell
 
@@ -151,11 +153,13 @@ finish the turn exactly.
 | Arm | **UR5e**, a 6-axis arm from Universal Robots, standing on the floor. The model comes from their own `ur_description` package. |
 | Gripper | A two-finger parallel gripper, defined in this repo. Each finger grips through four small pads. |
 | Camera | An RGB-D camera on the wrist, beside the gripper, looking the way the fingers point. |
-| Wall | A low wall, 45 cm long, 6 to 8 cm high, somewhere to the arm's left. |
-| Table top | A light board, 24–32 cm by 16–20 cm, 1.6–2.0 cm thick, standing on its long edge and leaning back 15–22° onto the wall. |
-| Legs | Four identical sticks, 13–16 cm long and 2.5–3.5 cm square, lying anywhere to the arm's right. |
+| Stands | Two grey blocks, 8–9 cm high, one under each end of the top. |
+| Table top | A light board, 24–30 cm by 16–20 cm, 1.6–2.0 cm thick, lying flat on the stands 55–60 cm to the arm's left, its long side facing the arm, give or take 8°. |
+| Legs | Four identical sticks, 13–16 cm long and 2.5–3.5 cm square, standing on end anywhere 40–60 cm to the arm's right, at least 12 cm apart. |
 
-`SEED` picks the room. The finished table is about 15 to 18 cm tall.
+`SEED` picks the room: it is the seed of the random numbers every size and
+position above is drawn from, so the same seed always gives the same room.
+The finished table is about 15 to 18 cm tall.
 
 Everything in it is open source:
 

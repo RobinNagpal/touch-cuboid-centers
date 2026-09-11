@@ -1,7 +1,7 @@
 """Putting the world file together.
 
 The room, the lighting and the floor never change, and they live in
-``cell.sdf``. The wall, the table top and the legs change every run. Rather
+``cell.sdf``. The stands, the table top and the legs change every run. Rather
 than edit a world file by hand before each run, the world is assembled here:
 the fixed room is read from disk and this run's boxes are dropped into the
 marker line ``cell.sdf`` leaves for them. What comes out is a complete world
